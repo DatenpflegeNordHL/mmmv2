@@ -1,7 +1,6 @@
 # 🎵 Melodic Metadata Massacrer (MMM)
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Experimental-orange.svg)]()
 
 > *"In the symphony of digital rights, we are the conductors of chaos."* 🎼⚡
@@ -348,7 +347,7 @@ MMM features a unique hacker-aesthetic interface:
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+See the [LICENSE](LICENSE) file for details.
 
 ## 🤝 Acknowledgments
 
