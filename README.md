@@ -21,6 +21,7 @@
 - **Paranoid Mode**: Maximum destruction with multiple cleaning passes
 - **Batch Processing**: Parallel processing of entire directories
 - **Verification Engine**: Before/after comparison with forensic reporting
+- **Web Interface**: Local drag-and-drop browser UI via `mmm server`
 
 ### Detection Methods
 - Spread spectrum watermarks
@@ -161,6 +162,23 @@ Forensic analysis without modification
 mmm analyze INPUT_FILE                # Regular mode (slow on long files)
 mmm analyze INPUT_FILE --turbo        # Turbo mode (faster)
 ```
+
+### `server`
+Browser-based drag-and-drop interface
+
+```bash
+mmm server                              # Start on localhost:8778
+mmm server --port 9000                  # Custom port
+mmm server --host 0.0.0.0              # Network-accessible (warns)
+mmm server --max-size 1000             # 1 GB upload limit
+
+Options:
+  --host TEXT         Bind address  [default: 127.0.0.1]
+  --port INTEGER      Listen port  [default: 8778]
+  --max-size INTEGER  Max upload in MB  [default: 500]
+```
+
+Open `http://127.0.0.1:8778` in your browser to drag-and-drop audio files for sanitization. Supports MP3, WAV, and FLAC. Processing uses the turbo/preserving sanitizer path with optional paranoid mode.
 
 ### `config`
 Configuration management
