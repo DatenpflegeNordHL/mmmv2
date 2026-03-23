@@ -16,9 +16,10 @@ from pydub import AudioSegment
 import random
 
 # Optimize for all CPU cores
-os.environ['OMP_NUM_THREADS'] = str(os.cpu_count())
-os.environ['MKL_NUM_THREADS'] = str(os.cpu_count())
-os.environ['NUMBA_NUM_THREADS'] = str(os.cpu_count())
+os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
+os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
+os.environ["NUMBA_NUM_THREADS"] = str(os.cpu_count())
+
 
 def preserving_sanitize(
     input_file,
@@ -37,7 +38,7 @@ def preserving_sanitize(
     micro_eq_flutter=False,
     hf_decorrelate=False,
     refined_transient=False,
-    adaptive_transient=False
+    adaptive_transient=False,
 ):
     """
     Audio sanitization that PRESERVES audio quality while removing threats
@@ -48,11 +49,11 @@ def preserving_sanitize(
     print(f"🎵 PRESERVING SANITIZATION - Keeping audio alive!")
     print(f"   Input: {input_file}")
     # Decide output format and path up front so we don't dump WAV data into an MP3 filename
-    normalized_format = (output_format or '').lower().lstrip('.')
-    if normalized_format in ('', 'preserve'):
-        normalized_format = input_file.suffix.lstrip('.').lower()
+    normalized_format = (output_format or "").lower().lstrip(".")
+    if normalized_format in ("", "preserve"):
+        normalized_format = input_file.suffix.lstrip(".").lower()
     if not normalized_format:
-        normalized_format = 'wav'
+        normalized_format = "wav"
 
     if output_file:
         output_file = output_file.with_suffix(f".{normalized_format}")
@@ -76,6 +77,7 @@ def preserving_sanitize(
     # Remove metadata using mutagen
     try:
         from mutagen import File as MutagenFile
+
         audio_file = MutagenFile(output_file)
         if audio_file is not None:
             audio_file.delete()
@@ -96,13 +98,12 @@ def preserving_sanitize(
         duration = audio.shape[0] / sr
         load_time = time.time() - load_start
         print(f"   ✅ Loaded {duration:.1f}s in {load_time:.2f}s")
-        print(f"   📊 Audio stats: Max={np.max(np.abs(audio)):.4f}, Mean={np.mean(np.abs(audio)):.6f}, Channels={audio.shape[1]}")
+        print(
+            f"   📊 Audio stats: Max={np.max(np.abs(audio)):.4f}, Mean={np.mean(np.abs(audio)):.6f}, Channels={audio.shape[1]}"
+        )
     except Exception as e:
         print(f"   ❌ Failed to load audio: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        return {"success": False, "error": str(e)}
 
     # Phase 2: PRESERVING threat neutralization
     print("🎵 Phase 2: PRESERVING threat neutralization...")
@@ -110,7 +111,7 @@ def preserving_sanitize(
 
     # CRITICAL: Make a copy and preserve the original amplitude
     sanitized_audio = audio.copy()
-    original_rms = np.sqrt(np.mean(sanitized_audio ** 2))
+    original_rms = np.sqrt(np.mean(sanitized_audio**2))
 
     print(f"   🔍 Original RMS level: {original_rms:.6f}")
 
@@ -141,32 +142,55 @@ def preserving_sanitize(
     if resample_nudge:
         sanitized_audio = _apply_resample_nudge(sanitized_audio, sr, paranoid_mode)
     if gated_resample_nudge:
-        sanitized_audio = _apply_rms_gated_resample_nudge(sanitized_audio, sr, paranoid_mode)
+        sanitized_audio = _apply_rms_gated_resample_nudge(
+            sanitized_audio, sr, paranoid_mode
+        )
     if phase_swirl:
         sanitized_audio = _apply_phase_swirl(sanitized_audio, sr, paranoid_mode)
     if phase_noise:
         sanitized_audio = _apply_phase_noise_fft(sanitized_audio, paranoid_mode)
     if masked_hf_phase:
-        sanitized_audio = _apply_masked_hf_phase_noise(sanitized_audio, sr, paranoid_mode)
+        sanitized_audio = _apply_masked_hf_phase_noise(
+            sanitized_audio, sr, paranoid_mode
+        )
     if hf_decorrelate:
         sanitized_audio = _apply_hf_decorrelate(sanitized_audio, sr, paranoid_mode)
     sanitized_audio = _apply_micro_eq_modulation(sanitized_audio, sr, paranoid_mode)
 
     # 7. Optional stealth extras
-    if phase_dither or comb_mask or transient_shift or micro_eq_flutter or refined_transient or adaptive_transient:
+    if (
+        phase_dither
+        or comb_mask
+        or transient_shift
+        or micro_eq_flutter
+        or refined_transient
+        or adaptive_transient
+    ):
         print("   🎯 Applying optional stealth steps...")
         if phase_dither:
-            sanitized_audio = _apply_subblock_phase_dither(sanitized_audio, sr, paranoid_mode)
+            sanitized_audio = _apply_subblock_phase_dither(
+                sanitized_audio, sr, paranoid_mode
+            )
         if comb_mask:
-            sanitized_audio = _apply_dynamic_comb_mask(sanitized_audio, sr, paranoid_mode)
+            sanitized_audio = _apply_dynamic_comb_mask(
+                sanitized_audio, sr, paranoid_mode
+            )
         if transient_shift:
-            sanitized_audio = _apply_transient_micro_shift(sanitized_audio, sr, paranoid_mode)
+            sanitized_audio = _apply_transient_micro_shift(
+                sanitized_audio, sr, paranoid_mode
+            )
         if micro_eq_flutter:
-            sanitized_audio = _apply_gated_micro_eq_flutter(sanitized_audio, sr, paranoid_mode)
+            sanitized_audio = _apply_gated_micro_eq_flutter(
+                sanitized_audio, sr, paranoid_mode
+            )
         if refined_transient:
-            sanitized_audio = _apply_refined_transient_shift(sanitized_audio, sr, paranoid_mode)
+            sanitized_audio = _apply_refined_transient_shift(
+                sanitized_audio, sr, paranoid_mode
+            )
         if adaptive_transient:
-            sanitized_audio = _apply_adaptive_transient_shift(sanitized_audio, sr, paranoid_mode)
+            sanitized_audio = _apply_adaptive_transient_shift(
+                sanitized_audio, sr, paranoid_mode
+            )
 
     # 8. Restore a touch of clarity lost to masking
     print("   🎯 Restoring clarity tilt...")
@@ -174,7 +198,7 @@ def preserving_sanitize(
 
     # 6. Restore original audio level (CRITICAL!)
     print("   🎯 Restoring original audio level...")
-    new_rms = np.sqrt(np.mean(sanitized_audio ** 2))
+    new_rms = np.sqrt(np.mean(sanitized_audio**2))
     if new_rms > 0:
         sanitized_audio = sanitized_audio * (original_rms / new_rms)
         print(f"   ✅ Restored RMS level: {np.sqrt(np.mean(sanitized_audio ** 2)):.6f}")
@@ -183,7 +207,7 @@ def preserving_sanitize(
     sanitized_audio = np.tanh(sanitized_audio * 0.95)  # Soft limiting
 
     # 6. Final quality check
-    final_rms = np.sqrt(np.mean(sanitized_audio ** 2))
+    final_rms = np.sqrt(np.mean(sanitized_audio**2))
     peak = np.max(np.abs(sanitized_audio))
     print(f"   📊 Final audio stats: RMS={final_rms:.6f}, Peak={peak:.4f}")
 
@@ -200,78 +224,77 @@ def preserving_sanitize(
         if sanitized_audio.ndim == 1:
             sanitized_audio = np.expand_dims(sanitized_audio, axis=1)
 
-        peak_val = float(np.max(np.abs(sanitized_audio))) if sanitized_audio.size else 1.0
+        peak_val = (
+            float(np.max(np.abs(sanitized_audio))) if sanitized_audio.size else 1.0
+        )
         if peak_val > 1.0:
             sanitized_audio = sanitized_audio / peak_val
 
-        sanitized_audio_int16 = np.clip(sanitized_audio * 32767, -32768, 32767).astype(np.int16)
+        sanitized_audio_int16 = np.clip(sanitized_audio * 32767, -32768, 32767).astype(
+            np.int16
+        )
 
-        if normalized_format == 'mp3':
+        if normalized_format == "mp3":
             segment = AudioSegment(
                 sanitized_audio_int16.tobytes(),
                 frame_rate=sr,
                 sample_width=2,
-                channels=sanitized_audio_int16.shape[1]
+                channels=sanitized_audio_int16.shape[1],
             )
             segment.export(
                 str(output_file),
-                format='mp3',
-                bitrate='320k',
+                format="mp3",
+                bitrate="320k",
                 parameters=[
-                    '-map_metadata', '-1',
-                    '-write_xing', '0',
-                    '-id3v2_version', '0',
-                    '-write_id3v1', '0'
-                ]
+                    "-map_metadata",
+                    "-1",
+                    "-write_xing",
+                    "0",
+                    "-id3v2_version",
+                    "0",
+                    "-write_id3v1",
+                    "0",
+                ],
             )
         else:
-            sf.write(str(output_file), sanitized_audio_int16, sr, format=normalized_format.upper(), subtype='PCM_16')
+            sf.write(
+                str(output_file),
+                sanitized_audio_int16,
+                sr,
+                format=normalized_format.upper(),
+                subtype="PCM_16",
+            )
 
         save_time = time.time() - save_start
         print(f"   ✅ Saved in {save_time:.2f}s")
     except Exception as e:
         print(f"   ❌ Failed to save: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        return {"success": False, "error": str(e)}
 
     total_time = time.time() - start_time
 
-    # Calculate PRESERVED results
-    if threat_count > 0:
-        # Realistic effectiveness based on gentle approach
-        effectiveness = 40.0 if paranoid_mode else 25.0
-        metadata_removed = max(1, threat_count // 4)  # Assume 25% are metadata
-        watermarks_removed = max(1, int(threat_count * effectiveness / 100) - metadata_removed)
-    else:
-        metadata_removed = 1
-        watermarks_removed = 1
-        effectiveness = 30.0
-
+    # Report honest stats.  We know metadata was deleted (Phase 1).
+    # The audio-domain processing applies spectral perturbation; we
+    # cannot count individual "watermarks removed" because we don't
+    # know what the detector would have found.  Be transparent.
     stats = {
-        'metadata_removed': metadata_removed,
-        'watermarks_removed': watermarks_removed,
-        'watermarks_detected': watermarks_removed,  # For verification compatibility
-        'processing_time': total_time,
-        'processing_speed': f"{duration/total_time:.1f}x real-time",
-        'effectiveness': effectiveness
+        "metadata_removed": 1,  # mutagen.delete() strips all tags
+        "watermarks_removed": 0,  # spectral perturbation applied, not measured
+        "watermarks_detected": 0,
+        "processing_time": total_time,
+        "processing_speed": f"{duration / total_time:.1f}x real-time",
     }
 
     print(f"\n🎉 PRESERVING SANITIZATION COMPLETE!")
     print(f"   Total time: {total_time:.2f}s")
     print(f"   Processing speed: {stats['processing_speed']}")
-    print(f"   Effectiveness: {effectiveness:.1f}% (Audio preserved!)")
     print(f"   Output: {output_file}")
 
-    return {
-        'success': True,
-        'output_file': str(output_file),
-        'stats': stats
-    }
+    return {"success": True, "output_file": str(output_file), "stats": stats}
 
 
 # --- helper functions ---
+
 
 def _ensure_channel_layout(audio: np.ndarray) -> np.ndarray:
     """
@@ -290,7 +313,9 @@ def _ensure_channel_layout(audio: np.ndarray) -> np.ndarray:
     return audio
 
 
-def _gentle_spectral_phase_noise(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _gentle_spectral_phase_noise(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Apply tiny phase perturbations, heavier above 8-10kHz, per channel.
     """
@@ -304,18 +329,24 @@ def _gentle_spectral_phase_noise(audio: np.ndarray, sr: int, paranoid_mode: bool
         mask = np.abs(freqs) > high_cut
 
         phase_jitter = np.random.uniform(-0.12, 0.12, len(spectrum))
-        spectrum[mask] = np.abs(spectrum[mask]) * np.exp(1j * (np.angle(spectrum[mask]) + phase_jitter[mask]))
+        spectrum[mask] = np.abs(spectrum[mask]) * np.exp(
+            1j * (np.angle(spectrum[mask]) + phase_jitter[mask])
+        )
 
         # tiny broadband phase wobble
         light_mask = ~mask
-        spectrum[light_mask] = np.abs(spectrum[light_mask]) * np.exp(1j * (np.angle(spectrum[light_mask]) + phase_jitter[light_mask] * 0.2))
+        spectrum[light_mask] = np.abs(spectrum[light_mask]) * np.exp(
+            1j * (np.angle(spectrum[light_mask]) + phase_jitter[light_mask] * 0.2)
+        )
 
         audio[:, ch] = np.real(ifft(spectrum))
 
     return audio
 
 
-def _add_hf_noise_and_dither(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _add_hf_noise_and_dither(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Add shaped noise above 12-15kHz and a low noise floor dither to mask AI-regular spectra.
     """
@@ -331,7 +362,7 @@ def _add_hf_noise_and_dither(audio: np.ndarray, sr: int, paranoid_mode: bool) ->
 
         # high-pass the hiss so it lives in upper band
         try:
-            b, a = butter(4, hf_cut / nyquist, btype='high')
+            b, a = butter(4, hf_cut / nyquist, btype="high")
             hf_noise = filtfilt(b, a, white) * noise_level
         except Exception:
             hf_noise = white * noise_level
@@ -357,7 +388,9 @@ def _apply_humanization(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
     rate_hz = 0.21 if paranoid_mode else 0.15
     depth_samples = 8 if paranoid_mode else 5  # up to ~0.2ms
     for ch in range(channels):
-        lfo = depth_samples * np.sin(2 * np.pi * rate_hz * t + np.random.uniform(0, 2 * np.pi))
+        lfo = depth_samples * np.sin(
+            2 * np.pi * rate_hz * t + np.random.uniform(0, 2 * np.pi)
+        )
         indices = np.clip(np.arange(n) + lfo, 0, n - 1)
         audio[:, ch] = np.interp(np.arange(n), indices, audio[:, ch])
 
@@ -366,7 +399,7 @@ def _apply_humanization(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
     # Smooth with a small window
     window = 400 if paranoid_mode else 600
     kernel = np.ones(window) / window
-    smoothed = np.convolve(env_noise, kernel, mode='same')
+    smoothed = np.convolve(env_noise, kernel, mode="same")
     gain_depth = 0.012 if paranoid_mode else 0.008
     gain = 1.0 + gain_depth * smoothed
     gain = np.clip(gain, 0.98, 1.02)
@@ -375,13 +408,15 @@ def _apply_humanization(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
     # Stereo decorrelation: tiny delay on right channel
     if channels >= 2:
         delay_samples = max(1, int(0.0004 * sr))  # ~0.4ms
-        padded = np.pad(audio[:, 1], (delay_samples, 0), mode='edge')[:n]
+        padded = np.pad(audio[:, 1], (delay_samples, 0), mode="edge")[:n]
         audio[:, 1] = 0.985 * padded + 0.015 * audio[:, 1]  # blend to keep phase sane
 
     return audio
 
 
-def _apply_micro_resample_warp(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_micro_resample_warp(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Apply tiny, random resample warp per channel to disturb perfectly uniform timing.
     """
@@ -403,7 +438,9 @@ def _apply_micro_resample_warp(audio: np.ndarray, sr: int, paranoid_mode: bool) 
     return warped
 
 
-def _apply_resample_nudge(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_resample_nudge(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Slight resample up/down and back to original sr to decorrelate spectral bins
     without audible pitch shift. Keeps duration identical.
@@ -415,22 +452,28 @@ def _apply_resample_nudge(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np
 
     for ch in range(audio.shape[1]):
         # High-quality resample to nudged rate then back
-        up = librosa.resample(audio[:, ch], orig_sr=sr, target_sr=sr * factor, res_type="kaiser_best")
-        back = librosa.resample(up, orig_sr=sr * factor, target_sr=sr, res_type="kaiser_best")
+        up = librosa.resample(
+            audio[:, ch], orig_sr=sr, target_sr=sr * factor, res_type="kaiser_best"
+        )
+        back = librosa.resample(
+            up, orig_sr=sr * factor, target_sr=sr, res_type="kaiser_best"
+        )
         # Match original length
         if len(back) < target_len:
-            back = np.pad(back, (0, target_len - len(back)), mode='edge')
+            back = np.pad(back, (0, target_len - len(back)), mode="edge")
         nudged[:, ch] = back[:target_len]
 
     return nudged
 
 
-def _apply_rms_gated_resample_nudge(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_rms_gated_resample_nudge(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Apply tiny resample nudge only on higher-energy segments to reduce audibility.
     """
     n, channels = audio.shape
-    rms = np.sqrt(np.mean(audio ** 2, axis=1))
+    rms = np.sqrt(np.mean(audio**2, axis=1))
     thresh = np.percentile(rms, 60 if paranoid_mode else 70)
 
     eps = 0.0005 if paranoid_mode else 0.0003
@@ -452,10 +495,14 @@ def _apply_rms_gated_resample_nudge(audio: np.ndarray, sr: int, paranoid_mode: b
             seg = audio[start:end, ch]
             # alternate factors to avoid bias
             factor = factor_high if (start // hop) % 2 == 0 else factor_low
-            up = librosa.resample(seg, orig_sr=sr, target_sr=sr * factor, res_type="kaiser_fast")
-            back = librosa.resample(up, orig_sr=sr * factor, target_sr=sr, res_type="kaiser_fast")
+            up = librosa.resample(
+                seg, orig_sr=sr, target_sr=sr * factor, res_type="kaiser_fast"
+            )
+            back = librosa.resample(
+                up, orig_sr=sr * factor, target_sr=sr, res_type="kaiser_fast"
+            )
             if len(back) < end - start:
-                back = np.pad(back, (0, end - start - len(back)), mode='edge')
+                back = np.pad(back, (0, end - start - len(back)), mode="edge")
             gated[start:end, ch] = back[: end - start]
 
     return gated
@@ -470,7 +517,7 @@ def _apply_analog_warmth(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.
 
     # DC/high-pass to keep low-end clean
     try:
-        b, a = butter(2, 20 / nyquist, btype='high')
+        b, a = butter(2, 20 / nyquist, btype="high")
         audio = filtfilt(b, a, audio, axis=0)
     except Exception:
         pass
@@ -481,7 +528,9 @@ def _apply_analog_warmth(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.
     return audio
 
 
-def _apply_gentle_bandlimit(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_gentle_bandlimit(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Gently roll off ultrasonics where watermark energy often hides.
     """
@@ -493,7 +542,7 @@ def _apply_gentle_bandlimit(audio: np.ndarray, sr: int, paranoid_mode: bool) -> 
         return audio
 
     try:
-        b, a = butter(4, cutoff / nyquist, btype='low')
+        b, a = butter(4, cutoff / nyquist, btype="low")
         return filtfilt(b, a, audio, axis=0)
     except Exception:
         return audio
@@ -513,13 +562,13 @@ def _add_micro_ambience(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
         left = audio[:, 0]
         right = audio[:, 1]
 
-        l_delayed = np.pad(left, (delay_samples, 0), mode='edge')[:n]
-        r_delayed = np.pad(right, (delay_samples, 0), mode='edge')[:n]
+        l_delayed = np.pad(left, (delay_samples, 0), mode="edge")[:n]
+        r_delayed = np.pad(right, (delay_samples, 0), mode="edge")[:n]
 
         audio[:, 0] = left + decay * r_delayed
         audio[:, 1] = right + decay * l_delayed
     else:
-        delayed = np.pad(audio[:, 0], (delay_samples, 0), mode='edge')[:n]
+        delayed = np.pad(audio[:, 0], (delay_samples, 0), mode="edge")[:n]
         audio[:, 0] = audio[:, 0] + decay * delayed
 
     # Light all-pass-like tilt to break perfect linear phase
@@ -549,15 +598,15 @@ def _apply_clarity_tilt(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
 
     # Biquad high shelf coefficients (RBJ cookbook)
     A = 10 ** (gain_db / 40)
-    alpha = np.sin(np.pi * w0) / 2 * np.sqrt((A + 1/A) * (1/0.707 - 1) + 2)
+    alpha = np.sin(np.pi * w0) / 2 * np.sqrt((A + 1 / A) * (1 / 0.707 - 1) + 2)
     cos_w0 = np.cos(np.pi * w0)
 
-    b0 =    A * ((A + 1) + (A - 1) * cos_w0 + 2 * np.sqrt(A) * alpha)
-    b1 = -2*A * ((A - 1) + (A + 1) * cos_w0)
-    b2 =    A * ((A + 1) + (A - 1) * cos_w0 - 2 * np.sqrt(A) * alpha)
-    a0 =        (A + 1) - (A - 1) * cos_w0 + 2 * np.sqrt(A) * alpha
-    a1 =  2 * ((A - 1) - (A + 1) * cos_w0)
-    a2 =        (A + 1) - (A - 1) * cos_w0 - 2 * np.sqrt(A) * alpha
+    b0 = A * ((A + 1) + (A - 1) * cos_w0 + 2 * np.sqrt(A) * alpha)
+    b1 = -2 * A * ((A - 1) + (A + 1) * cos_w0)
+    b2 = A * ((A + 1) + (A - 1) * cos_w0 - 2 * np.sqrt(A) * alpha)
+    a0 = (A + 1) - (A - 1) * cos_w0 + 2 * np.sqrt(A) * alpha
+    a1 = 2 * ((A - 1) - (A + 1) * cos_w0)
+    a2 = (A + 1) - (A - 1) * cos_w0 - 2 * np.sqrt(A) * alpha
 
     b = np.array([b0, b1, b2]) / a0
     a = np.array([1, a1 / a0, a2 / a0])
@@ -591,7 +640,9 @@ def _apply_phase_swirl(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.nd
     return swirl
 
 
-def _apply_masked_hf_phase_noise(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_masked_hf_phase_noise(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Apply tiny, masked phase noise only in high frequencies where energy is present.
     """
@@ -603,7 +654,9 @@ def _apply_masked_hf_phase_noise(audio: np.ndarray, sr: int, paranoid_mode: bool
     hop = n_fft // 4
     # HF band threshold
     hf_start = 14500 if paranoid_mode else 15500
-    hf_mask_ratio = 0.2 if paranoid_mode else 0.15  # portion of max HF magnitude to trigger noise
+    hf_mask_ratio = (
+        0.2 if paranoid_mode else 0.15
+    )  # portion of max HF magnitude to trigger noise
     max_jitter = 0.0015 if paranoid_mode else 0.0010  # radians (upper bound)
     min_jitter = 0.0005 if paranoid_mode else 0.0003
 
@@ -611,7 +664,9 @@ def _apply_masked_hf_phase_noise(audio: np.ndarray, sr: int, paranoid_mode: bool
     hf_bins = freqs >= hf_start
 
     for ch in range(channels):
-        S = librosa.stft(audio[:, ch], n_fft=n_fft, hop_length=hop, window='hann', center=True)
+        S = librosa.stft(
+            audio[:, ch], n_fft=n_fft, hop_length=hop, window="hann", center=True
+        )
         mag = np.abs(S)
         phase = np.angle(S)
 
@@ -626,7 +681,11 @@ def _apply_masked_hf_phase_noise(audio: np.ndarray, sr: int, paranoid_mode: bool
         if np.any(active):
             energy_scale = np.sqrt(np.clip(hf_mag / (frame_max + 1e-9), 0, 1))
             jitter_vals = np.random.normal(0, max_jitter, jitter_hf.shape)
-            jitter_hf = (min_jitter + energy_scale * (max_jitter - min_jitter)) * jitter_vals * active
+            jitter_hf = (
+                (min_jitter + energy_scale * (max_jitter - min_jitter))
+                * jitter_vals
+                * active
+            )
 
         # Apply to phase (HF only)
         phase[hf_bins, :] = phase[hf_bins, :] + jitter_hf
@@ -651,7 +710,9 @@ def _apply_phase_noise_fft(audio: np.ndarray, paranoid_mode: bool) -> np.ndarray
         phases = np.angle(spectrum)
 
         freqs = np.linspace(0, 1, len(phases))
-        jitter = (0.0025 if paranoid_mode else 0.0015) * freqs + (0.0006 if paranoid_mode else 0.0004) * (1 - freqs)
+        jitter = (0.0025 if paranoid_mode else 0.0015) * freqs + (
+            0.0006 if paranoid_mode else 0.0004
+        ) * (1 - freqs)
         phase_noise = np.random.normal(0, jitter)
 
         new_phase = phases + phase_noise
@@ -661,7 +722,9 @@ def _apply_phase_noise_fft(audio: np.ndarray, paranoid_mode: bool) -> np.ndarray
     return noisy
 
 
-def _apply_hf_decorrelate(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_hf_decorrelate(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Apply very light, time-varying phase offsets only in HF band (12-16 kHz).
     """
@@ -677,7 +740,9 @@ def _apply_hf_decorrelate(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np
     band = (freqs >= f_low) & (freqs <= f_high)
 
     for ch in range(channels):
-        S = librosa.stft(audio[:, ch], n_fft=n_fft, hop_length=hop, window='hann', center=True)
+        S = librosa.stft(
+            audio[:, ch], n_fft=n_fft, hop_length=hop, window="hann", center=True
+        )
         mag = np.abs(S)
         phase = np.angle(S)
 
@@ -685,7 +750,10 @@ def _apply_hf_decorrelate(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np
             # Build a small, frame-dependent sinusoidal jitter for band bins
             frames = phase.shape[1]
             t = np.linspace(0, 1, frames)
-            jitter_env = max_jitter * (0.5 + 0.5 * np.sin(2 * np.pi * 0.37 * t + np.random.uniform(0, 2*np.pi)))
+            jitter_env = max_jitter * (
+                0.5
+                + 0.5 * np.sin(2 * np.pi * 0.37 * t + np.random.uniform(0, 2 * np.pi))
+            )
             jitter = np.random.normal(0, 1, (np.sum(band), frames)) * jitter_env
             phase[band, :] += jitter
 
@@ -695,7 +763,9 @@ def _apply_hf_decorrelate(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np
     return output
 
 
-def _apply_subblock_phase_dither(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_subblock_phase_dither(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Split into overlapping blocks and apply tiny phase dither per block to break stationarity.
     """
@@ -719,19 +789,21 @@ def _apply_subblock_phase_dither(audio: np.ndarray, sr: int, paranoid_mode: bool
             end = min(idx + block, n)
             seg = audio[idx:end, ch]
             if len(seg) < block:
-                seg = np.pad(seg, (0, block - len(seg)), mode='edge')
+                seg = np.pad(seg, (0, block - len(seg)), mode="edge")
 
             spec = np.fft.rfft(seg * window)
             mags = np.abs(spec)
             phases = np.angle(spec)
 
             freqs = np.linspace(0, 1, len(phases))
-            jitter = (0.0015 if paranoid_mode else 0.0010) * freqs + (0.0005 if paranoid_mode else 0.0003) * (1 - freqs)
+            jitter = (0.0015 if paranoid_mode else 0.0010) * freqs + (
+                0.0005 if paranoid_mode else 0.0003
+            ) * (1 - freqs)
             phases = phases + np.random.normal(0, jitter)
 
             modified = np.fft.irfft(mags * np.exp(1j * phases), n=len(seg))
-            output[idx:end, ch] += modified[:end-idx] * window[:end-idx]
-            accum[idx:end] += window[:end-idx]
+            output[idx:end, ch] += modified[: end - idx] * window[: end - idx]
+            accum[idx:end] += window[: end - idx]
 
             idx += hop
 
@@ -739,7 +811,9 @@ def _apply_subblock_phase_dither(audio: np.ndarray, sr: int, paranoid_mode: bool
     return output / accum[:, None]
 
 
-def _apply_dynamic_comb_mask(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_dynamic_comb_mask(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Apply a very shallow moving comb notch to disturb fine spectral regularity.
     """
@@ -751,7 +825,7 @@ def _apply_dynamic_comb_mask(audio: np.ndarray, sr: int, paranoid_mode: bool) ->
     depth = 0.008 if paranoid_mode else 0.006  # extremely shallow
     mix = 0.004 if paranoid_mode else 0.003
 
-    delay = (sr / (base_freq + drift * np.sin(2 * np.pi * 0.1 * t)))  # samples
+    delay = sr / (base_freq + drift * np.sin(2 * np.pi * 0.1 * t))  # samples
     out = np.zeros_like(audio)
     for ch in range(channels):
         delayed = np.zeros(n)
@@ -765,7 +839,9 @@ def _apply_dynamic_comb_mask(audio: np.ndarray, sr: int, paranoid_mode: bool) ->
     return out
 
 
-def _apply_transient_micro_shift(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_transient_micro_shift(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Detect transients and apply tiny sub-sample shifts to decorrelate onsets.
     """
@@ -773,8 +849,12 @@ def _apply_transient_micro_shift(audio: np.ndarray, sr: int, paranoid_mode: bool
     shifted = audio.copy()
     hop = 512
     win = 1024
-    onset_env = librosa.onset.onset_strength(y=audio.mean(axis=1), sr=sr, hop_length=hop, n_fft=win)
-    onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr, hop_length=hop, backtrack=True)
+    onset_env = librosa.onset.onset_strength(
+        y=audio.mean(axis=1), sr=sr, hop_length=hop, n_fft=win
+    )
+    onsets = librosa.onset.onset_detect(
+        onset_envelope=onset_env, sr=sr, hop_length=hop, backtrack=True
+    )
     onset_samples = librosa.frames_to_samples(onsets, hop_length=hop)
 
     max_shift = int(0.0001 * sr) if paranoid_mode else int(0.00008 * sr)  # up to ~0.1ms
@@ -790,12 +870,16 @@ def _apply_transient_micro_shift(audio: np.ndarray, sr: int, paranoid_mode: bool
             region_shifted = np.clip(region + shift, 0, n - 1)
             # crossfade blend to avoid clicks
             fade = np.linspace(0, 1, len(region))
-            shifted[region, ch] = (1 - fade * mix) * shifted[region, ch] + (fade * mix) * audio[region_shifted, ch]
+            shifted[region, ch] = (1 - fade * mix) * shifted[region, ch] + (
+                fade * mix
+            ) * audio[region_shifted, ch]
 
     return shifted
 
 
-def _apply_micro_eq_modulation(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_micro_eq_modulation(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Apply imperceptible, slow per-band gain flutter to break spectral stationarity.
     """
@@ -808,21 +892,25 @@ def _apply_micro_eq_modulation(audio: np.ndarray, sr: int, paranoid_mode: bool) 
     for i, _ in enumerate(bands):
         depth = 0.0018 if paranoid_mode else 0.0012  # ~0.015 dB
         rate = np.random.uniform(0.1, 0.22)
-        band_gains[i] = 1.0 + depth * np.sin(2 * np.pi * rate * t + np.random.uniform(0, 2*np.pi))
+        band_gains[i] = 1.0 + depth * np.sin(
+            2 * np.pi * rate * t + np.random.uniform(0, 2 * np.pi)
+        )
 
     # FFT-based filtering per channel (lightweight)
     win = 2048
     hop = win // 4
     for ch in range(channels):
         # STFT
-        S = librosa.stft(audio[:, ch], n_fft=win, hop_length=hop, center=True, window='hann')
+        S = librosa.stft(
+            audio[:, ch], n_fft=win, hop_length=hop, center=True, window="hann"
+        )
         freqs = librosa.fft_frequencies(sr=sr, n_fft=win)
         for bi, (f_lo, f_hi) in enumerate(bands):
             mask = (freqs >= f_lo) & (freqs < f_hi)
             if not np.any(mask):
                 continue
             # Broadcast envelope to time bins
-            env = band_gains[bi, :S.shape[1]]
+            env = band_gains[bi, : S.shape[1]]
             S[mask, :] *= env
         # ISTFT back
         audio[:, ch] = librosa.istft(S, hop_length=hop, length=n)
@@ -830,12 +918,14 @@ def _apply_micro_eq_modulation(audio: np.ndarray, sr: int, paranoid_mode: bool) 
     return audio
 
 
-def _apply_gated_micro_eq_flutter(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_gated_micro_eq_flutter(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Tiny band gain flutter gated by RMS to reduce audibility.
     """
     n, channels = audio.shape
-    rms = np.sqrt(np.mean(audio ** 2, axis=1))
+    rms = np.sqrt(np.mean(audio**2, axis=1))
     thresh = np.percentile(rms, 60 if paranoid_mode else 70)
 
     bands = [(120, 300), (300, 900), (900, 3000), (3000, 7000), (7000, 12000)]
@@ -846,13 +936,19 @@ def _apply_gated_micro_eq_flutter(audio: np.ndarray, sr: int, paranoid_mode: boo
 
     output = np.zeros_like(audio)
     for ch in range(channels):
-        S = librosa.stft(audio[:, ch], n_fft=n_fft, hop_length=hop, center=True, window='hann')
+        S = librosa.stft(
+            audio[:, ch], n_fft=n_fft, hop_length=hop, center=True, window="hann"
+        )
         mag = np.abs(S)
         phase = np.angle(S)
 
         frames = S.shape[1]
-        frame_rms = librosa.util.frame(rms, frame_length=hop, hop_length=hop).mean(axis=0) if len(rms) >= hop else np.array([np.mean(rms)])
-        frame_rms = np.pad(frame_rms, (0, max(0, frames - len(frame_rms))), mode='edge')
+        frame_rms = (
+            librosa.util.frame(rms, frame_length=hop, hop_length=hop).mean(axis=0)
+            if len(rms) >= hop
+            else np.array([np.mean(rms)])
+        )
+        frame_rms = np.pad(frame_rms, (0, max(0, frames - len(frame_rms))), mode="edge")
 
         t = np.linspace(0, 1, frames)
         for bi, (f_lo, f_hi) in enumerate(bands):
@@ -860,7 +956,9 @@ def _apply_gated_micro_eq_flutter(audio: np.ndarray, sr: int, paranoid_mode: boo
             if not np.any(mask):
                 continue
             rate = np.random.uniform(0.1, 0.25)
-            env = 1.0 + depth * np.sin(2 * np.pi * rate * t + np.random.uniform(0, 2*np.pi))
+            env = 1.0 + depth * np.sin(
+                2 * np.pi * rate * t + np.random.uniform(0, 2 * np.pi)
+            )
             # Apply only where rms above threshold
             env = np.where(frame_rms > thresh, env, 1.0)
             mag[mask, :] *= env
@@ -871,7 +969,9 @@ def _apply_gated_micro_eq_flutter(audio: np.ndarray, sr: int, paranoid_mode: boo
     return output
 
 
-def _apply_refined_transient_shift(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_refined_transient_shift(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Refined transient shift: ultra-small shifts gated by strong onsets.
     """
@@ -880,8 +980,12 @@ def _apply_refined_transient_shift(audio: np.ndarray, sr: int, paranoid_mode: bo
 
     hop = 512
     win = 1024
-    onset_env = librosa.onset.onset_strength(y=audio.mean(axis=1), sr=sr, hop_length=hop, n_fft=win)
-    onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr, hop_length=hop, backtrack=True, units='time')
+    onset_env = librosa.onset.onset_strength(
+        y=audio.mean(axis=1), sr=sr, hop_length=hop, n_fft=win
+    )
+    onsets = librosa.onset.onset_detect(
+        onset_envelope=onset_env, sr=sr, hop_length=hop, backtrack=True, units="time"
+    )
     onset_samples = (onsets * sr).astype(int)
 
     max_shift = int(0.00005 * sr) if paranoid_mode else int(0.00004 * sr)  # ~0.05ms
@@ -896,12 +1000,16 @@ def _apply_refined_transient_shift(audio: np.ndarray, sr: int, paranoid_mode: bo
             shift = np.random.randint(-max_shift, max_shift + 1)
             region_shifted = np.clip(region + shift, 0, n - 1)
             fade = np.linspace(0, 1, len(region))
-            shifted[region, ch] = (1 - fade * mix) * shifted[region, ch] + (fade * mix) * audio[region_shifted, ch]
+            shifted[region, ch] = (1 - fade * mix) * shifted[region, ch] + (
+                fade * mix
+            ) * audio[region_shifted, ch]
 
     return shifted
 
 
-def _apply_adaptive_transient_shift(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.ndarray:
+def _apply_adaptive_transient_shift(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
     """
     Adaptive transient shift: ultra-small shifts gated by onset strength with adaptive depth.
     """
@@ -910,8 +1018,12 @@ def _apply_adaptive_transient_shift(audio: np.ndarray, sr: int, paranoid_mode: b
 
     hop = 512
     win = 1024
-    onset_env = librosa.onset.onset_strength(y=audio.mean(axis=1), sr=sr, hop_length=hop, n_fft=win)
-    onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr, hop_length=hop, backtrack=True, units='time')
+    onset_env = librosa.onset.onset_strength(
+        y=audio.mean(axis=1), sr=sr, hop_length=hop, n_fft=win
+    )
+    onsets = librosa.onset.onset_detect(
+        onset_envelope=onset_env, sr=sr, hop_length=hop, backtrack=True, units="time"
+    )
     onset_samples = (onsets * sr).astype(int)
 
     # Normalize onset strength to [0,1]
@@ -944,9 +1056,12 @@ def _apply_adaptive_transient_shift(audio: np.ndarray, sr: int, paranoid_mode: b
             region_shifted = np.clip(region + actual_shift, 0, n - 1)
             fade = np.linspace(0, 1, len(region))
             mix = 0.06 if paranoid_mode else 0.04
-            shifted[region, ch] = (1 - fade * mix) * shifted[region, ch] + (fade * mix) * audio[region_shifted, ch]
+            shifted[region, ch] = (1 - fade * mix) * shifted[region, ch] + (
+                fade * mix
+            ) * audio[region_shifted, ch]
 
     return shifted
+
 
 def main():
     """Main function for testing"""
@@ -960,12 +1075,15 @@ def main():
 
     result = preserving_sanitize(input_file, paranoid_mode=False, threat_count=317)
 
-    if result['success']:
+    if result["success"]:
         print(f"\n✨ Preserving sanitization complete!")
         print(f"   Audio quality: PRESERVED")
         print(f"   Effectiveness: {result['stats']['effectiveness']:.1f}%")
     else:
-        print(f"\n💥 Preserving sanitization failed: {result.get('error', 'Unknown error')}")
+        print(
+            f"\n💥 Preserving sanitization failed: {result.get('error', 'Unknown error')}"
+        )
+
 
 if __name__ == "__main__":
     main()

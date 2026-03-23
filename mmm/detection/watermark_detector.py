@@ -17,12 +17,12 @@ class WatermarkDetector:
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         self.detection_methods = [
-            'spread_spectrum',
-            'echo_based',
-            'statistical',
-            'phase_modulation',
-            'amplitude_modulation',
-            'frequency_domain'
+            "spread_spectrum",
+            "echo_based",
+            "statistical",
+            "phase_modulation",
+            "amplitude_modulation",
+            "frequency_domain",
         ]
 
     def detect_all(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
@@ -37,10 +37,10 @@ class WatermarkDetector:
             Dict containing all detection results
         """
         results = {
-            'detected': [],
-            'method_results': {},
-            'confidence_scores': {},
-            'watermark_count': 0
+            "detected": [],
+            "method_results": {},
+            "confidence_scores": {},
+            "watermark_count": 0,
         }
 
         # Ensure stereo handling
@@ -51,58 +51,65 @@ class WatermarkDetector:
         min_samples = 4096  # Minimum samples for meaningful analysis
         if audio_data.shape[0] < min_samples:
             return {
-                'detected': [],
-                'method_results': {},
-                'confidence_scores': {},
-                'watermark_count': 0,
-                'error': 'Audio too short for analysis'
+                "detected": [],
+                "method_results": {},
+                "confidence_scores": {},
+                "watermark_count": 0,
+                "error": "Audio too short for analysis",
             }
 
         # Run each detection method
         for method in self.detection_methods:
             try:
-                if method == 'spread_spectrum':
+                if method == "spread_spectrum":
                     result = self.detect_spread_spectrum(audio_data, sample_rate)
-                elif method == 'echo_based':
+                elif method == "echo_based":
                     result = self.detect_echo_signatures(audio_data, sample_rate)
-                elif method == 'statistical':
+                elif method == "statistical":
                     result = self.analyze_statistical_anomalies(audio_data, sample_rate)
-                elif method == 'phase_modulation':
+                elif method == "phase_modulation":
                     result = self.detect_phase_modulation(audio_data, sample_rate)
-                elif method == 'amplitude_modulation':
+                elif method == "amplitude_modulation":
                     result = self.detect_amplitude_modulation(audio_data, sample_rate)
-                elif method == 'frequency_domain':
-                    result = self.detect_frequency_domain_watermarks(audio_data, sample_rate)
+                elif method == "frequency_domain":
+                    result = self.detect_frequency_domain_watermarks(
+                        audio_data, sample_rate
+                    )
                 else:
                     continue
 
-                results['method_results'][method] = result
+                results["method_results"][method] = result
 
-                if result['detected']:
-                    results['detected'].append({
-                        'method': method,
-                        'confidence': result['confidence'],
-                        'details': result['details']
-                    })
-                    results['confidence_scores'][method] = result['confidence']
-                    results['watermark_count'] += 1
+                if result["detected"]:
+                    results["detected"].append(
+                        {
+                            "method": method,
+                            "confidence": result["confidence"],
+                            "details": result["details"],
+                        }
+                    )
+                    results["confidence_scores"][method] = result["confidence"]
+                    results["watermark_count"] += 1
 
             except Exception as e:
-                results['method_results'][method] = {
-                    'detected': False,
-                    'error': str(e),
-                    'confidence': 0
+                results["method_results"][method] = {
+                    "detected": False,
+                    "error": str(e),
+                    "confidence": 0,
                 }
 
-        # Calculate overall confidence
-        if results['watermark_count'] > 0:
-            results['overall_confidence'] = np.mean(list(results['confidence_scores'].values()))
+        # Calculate overall confidence, clamped to [0, 1]
+        if results["watermark_count"] > 0:
+            raw = float(np.mean(list(results["confidence_scores"].values())))
+            results["overall_confidence"] = max(0.0, min(1.0, raw))
         else:
-            results['overall_confidence'] = 0.0
+            results["overall_confidence"] = 0.0
 
         return results
 
-    def detect_spread_spectrum(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def detect_spread_spectrum(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         Detect spread spectrum watermarks using spectral analysis
 
@@ -113,7 +120,7 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {'detected': False, 'confidence': 0.0, 'details': []}
+        result = {"detected": False, "confidence": 0.0, "details": []}
 
         # Process each channel
         for channel_idx in range(audio_data.shape[1]):
@@ -129,7 +136,9 @@ class WatermarkDetector:
             magnitude = np.abs(Zxx)
 
             # Look for unusual patterns in high frequencies
-            high_freq_mask = f > 15000  # Focus on high frequencies where watermarks often hide
+            high_freq_mask = (
+                f > 15000
+            )  # Focus on high frequencies where watermarks often hide
             high_freq_data = magnitude[high_freq_mask, :]
 
             if high_freq_data.size == 0:
@@ -140,22 +149,29 @@ class WatermarkDetector:
             std_power = np.std(high_freq_data)
 
             # Check for suspiciously consistent patterns
-            consistency_score = 1.0 - (std_power / (mean_power + 1e-10))
+            raw_consistency = 1.0 - (std_power / (mean_power + 1e-10))
+            consistency_score = max(0.0, min(1.0, raw_consistency))
 
             # Look for periodic patterns
-            correlation = np.correlate(high_freq_data.flatten(), high_freq_data.flatten(), mode='same')
-            auto_corr_peaks = signal.find_peaks(correlation, height=np.max(correlation) * 0.8)[0]
+            correlation = np.correlate(
+                high_freq_data.flatten(), high_freq_data.flatten(), mode="same"
+            )
+            auto_corr_peaks = signal.find_peaks(
+                correlation, height=np.max(correlation) * 0.8
+            )[0]
 
             # Detection criteria
             if consistency_score > 0.7 or len(auto_corr_peaks) > 10:
-                result['detected'] = True
-                result['confidence'] = max(result['confidence'], consistency_score)
-                result['details'].append({
-                    'channel': channel_idx,
-                    'consistency_score': consistency_score,
-                    'periodic_peaks': len(auto_corr_peaks),
-                    'type': 'high_frequency_pattern'
-                })
+                result["detected"] = True
+                result["confidence"] = max(result["confidence"], consistency_score)
+                result["details"].append(
+                    {
+                        "channel": channel_idx,
+                        "consistency_score": consistency_score,
+                        "periodic_peaks": len(auto_corr_peaks),
+                        "type": "high_frequency_pattern",
+                    }
+                )
 
             # Check for known watermark frequencies
             known_watermark_freqs = [18000, 19000, 20000, 21000]
@@ -164,18 +180,22 @@ class WatermarkDetector:
                 freq_power = np.mean(magnitude[freq_idx, :])
 
                 if freq_power > mean_power + 3 * std_power:
-                    result['detected'] = True
-                    result['confidence'] = max(result['confidence'], 0.8)
-                    result['details'].append({
-                        'channel': channel_idx,
-                        'frequency': wf,
-                        'power_anomaly': freq_power / (mean_power + 1e-10),
-                        'type': 'suspicious_frequency'
-                    })
+                    result["detected"] = True
+                    result["confidence"] = max(result["confidence"], 0.8)
+                    result["details"].append(
+                        {
+                            "channel": channel_idx,
+                            "frequency": wf,
+                            "power_anomaly": freq_power / (mean_power + 1e-10),
+                            "type": "suspicious_frequency",
+                        }
+                    )
 
         return result
 
-    def detect_echo_signatures(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def detect_echo_signatures(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         Detect echo-based watermarks
 
@@ -186,14 +206,22 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {'detected': False, 'confidence': 0.0, 'details': []}
+        result = {"detected": False, "confidence": 0.0, "details": []}
+
+        # Echo watermarks use delays of 1-50 ms.  We only need
+        # autocorrelation out to ~50 ms, not the full O(N^2) correlate.
+        max_echo_samples = int(0.05 * sample_rate)  # 50 ms
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
 
-            # Compute autocorrelation to find echo patterns
-            autocorr = np.correlate(channel_data, channel_data, mode='full')
-            autocorr = autocorr[len(autocorr)//2:]
+            # Bounded autocorrelation — only compute lags up to max_echo_samples
+            # instead of the full O(N^2) np.correlate(mode="full").
+            n = len(channel_data)
+            lag_limit = min(max_echo_samples, n)
+            autocorr = np.array(
+                [np.dot(channel_data[:n - k], channel_data[k:]) for k in range(lag_limit)]
+            )
 
             # Find peaks in autocorrelation
             peaks, properties = signal.find_peaks(autocorr, height=0.1, distance=100)
@@ -216,22 +244,29 @@ class WatermarkDetector:
             if len(echo_delays) >= 2:
                 # Check if echoes form a pattern
                 delay_diffs = np.diff(echo_delays)
-                delay_consistency = 1.0 - (np.std(delay_diffs) / (np.mean(delay_diffs) + 1e-10))
+                raw_delay_consistency = 1.0 - (
+                    np.std(delay_diffs) / (np.mean(delay_diffs) + 1e-10)
+                )
+                delay_consistency = max(0.0, min(1.0, raw_delay_consistency))
 
                 if delay_consistency > 0.8:
-                    result['detected'] = True
-                    result['confidence'] = max(result['confidence'], delay_consistency)
-                    result['details'].append({
-                        'channel': channel_idx,
-                        'echo_count': len(echo_delays),
-                        'delay_consistency': delay_consistency,
-                        'avg_strength': np.mean(echo_strengths),
-                        'type': 'patterned_echoes'
-                    })
+                    result["detected"] = True
+                    result["confidence"] = max(result["confidence"], delay_consistency)
+                    result["details"].append(
+                        {
+                            "channel": channel_idx,
+                            "echo_count": len(echo_delays),
+                            "delay_consistency": delay_consistency,
+                            "avg_strength": np.mean(echo_strengths),
+                            "type": "patterned_echoes",
+                        }
+                    )
 
         return result
 
-    def analyze_statistical_anomalies(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def analyze_statistical_anomalies(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         Detect statistical anomalies typical of AI-generated audio
 
@@ -242,7 +277,7 @@ class WatermarkDetector:
         Returns:
             Dict containing analysis results
         """
-        result = {'detected': False, 'confidence': 0.0, 'details': []}
+        result = {"detected": False, "confidence": 0.0, "details": []}
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -251,53 +286,66 @@ class WatermarkDetector:
             features = {}
 
             # Distribution analysis
-            features['skewness'] = float(self._skewness(channel_data))
-            features['kurtosis'] = float(self._kurtosis(channel_data))
-            features['entropy'] = float(entropy(np.histogram(channel_data, bins=100)[0] + 1e-10))
+            features["skewness"] = float(self._skewness(channel_data))
+            features["kurtosis"] = float(self._kurtosis(channel_data))
+            features["entropy"] = float(
+                entropy(np.histogram(channel_data, bins=100)[0] + 1e-10)
+            )
 
             # Temporal analysis
             diff_signal = np.diff(channel_data)
-            features['diff_std'] = float(np.std(diff_signal))
-            features['diff_entropy'] = float(entropy(np.histogram(diff_signal, bins=100)[0] + 1e-10))
+            features["diff_std"] = float(np.std(diff_signal))
+            features["diff_entropy"] = float(
+                entropy(np.histogram(diff_signal, bins=100)[0] + 1e-10)
+            )
 
             # Frequency domain statistics
             fft = np.fft.fft(channel_data)
-            magnitude = np.abs(fft[:len(fft)//2])
-            features['spectral_entropy'] = float(entropy(magnitude + 1e-10))
-            features['spectral_centroid'] = float(np.sum(np.arange(len(magnitude)) * magnitude) / (np.sum(magnitude) + 1e-10))
+            magnitude = np.abs(fft[: len(fft) // 2])
+            features["spectral_entropy"] = float(entropy(magnitude + 1e-10))
+            features["spectral_centroid"] = float(
+                np.sum(np.arange(len(magnitude)) * magnitude)
+                / (np.sum(magnitude) + 1e-10)
+            )
 
             # AI-generated audio often has unusual statistical properties
             anomalies = []
 
             # Check for unusually low entropy (too perfect)
-            if features['entropy'] < 6.0:
-                anomalies.append('low_entropy')
-                result['detected'] = True
-                result['confidence'] = max(result['confidence'], 0.7)
+            if features["entropy"] < 6.0:
+                anomalies.append("low_entropy")
+                result["detected"] = True
+                result["confidence"] = max(result["confidence"], 0.7)
 
             # Check for unusual kurtosis
-            if abs(features['kurtosis'] - 3.0) > 2.0:  # Normal distribution has kurtosis = 3
-                anomalies.append('unusual_kurtosis')
-                result['detected'] = True
-                result['confidence'] = max(result['confidence'], 0.6)
+            if (
+                abs(features["kurtosis"] - 3.0) > 2.0
+            ):  # Normal distribution has kurtosis = 3
+                anomalies.append("unusual_kurtosis")
+                result["detected"] = True
+                result["confidence"] = max(result["confidence"], 0.6)
 
             # Check for low spectral entropy
-            if features['spectral_entropy'] < 8.0:
-                anomalies.append('low_spectral_entropy')
-                result['detected'] = True
-                result['confidence'] = max(result['confidence'], 0.5)
+            if features["spectral_entropy"] < 8.0:
+                anomalies.append("low_spectral_entropy")
+                result["detected"] = True
+                result["confidence"] = max(result["confidence"], 0.5)
 
             if anomalies:
-                result['details'].append({
-                    'channel': channel_idx,
-                    'anomalies': anomalies,
-                    'features': features,
-                    'type': 'statistical_anomaly'
-                })
+                result["details"].append(
+                    {
+                        "channel": channel_idx,
+                        "anomalies": anomalies,
+                        "features": features,
+                        "type": "statistical_anomaly",
+                    }
+                )
 
         return result
 
-    def detect_phase_modulation(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def detect_phase_modulation(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         Detect phase modulation watermarks
 
@@ -308,7 +356,7 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {'detected': False, 'confidence': 0.0, 'details': []}
+        result = {"detected": False, "confidence": 0.0, "details": []}
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -329,20 +377,25 @@ class WatermarkDetector:
             phase_mean = np.mean(phase_std)
 
             # Check for unusually consistent phase patterns
-            consistency_score = 1.0 - (phase_mean / (np.std(phase_std) + 1e-10))
+            raw_consistency = 1.0 - (phase_mean / (np.std(phase_std) + 1e-10))
+            consistency_score = max(0.0, min(1.0, raw_consistency))
 
             if consistency_score > 0.7:
-                result['detected'] = True
-                result['confidence'] = max(result['confidence'], consistency_score)
-                result['details'].append({
-                    'channel': channel_idx,
-                    'phase_consistency': consistency_score,
-                    'type': 'phase_pattern'
-                })
+                result["detected"] = True
+                result["confidence"] = max(result["confidence"], consistency_score)
+                result["details"].append(
+                    {
+                        "channel": channel_idx,
+                        "phase_consistency": consistency_score,
+                        "type": "phase_pattern",
+                    }
+                )
 
         return result
 
-    def detect_amplitude_modulation(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def detect_amplitude_modulation(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         Detect amplitude modulation watermarks
 
@@ -353,7 +406,7 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {'detected': False, 'confidence': 0.0, 'details': []}
+        result = {"detected": False, "confidence": 0.0, "details": []}
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -365,28 +418,34 @@ class WatermarkDetector:
             # Look for amplitude modulation patterns
             # Compute FFT of envelope to find modulation frequencies
             envelope_fft = np.fft.fft(amplitude_envelope)
-            envelope_freqs = np.fft.fftfreq(len(amplitude_envelope), 1/sample_rate)
+            envelope_freqs = np.fft.fftfreq(len(amplitude_envelope), 1 / sample_rate)
 
             # Check for suspicious modulation frequencies (typically 1-100 Hz for watermarks)
             modulation_range = (envelope_freqs > 1) & (envelope_freqs < 100)
             modulation_power = np.abs(envelope_fft[modulation_range])
 
             if len(modulation_power) > 0:
-                modulation_peaks, _ = signal.find_peaks(modulation_power, height=np.max(modulation_power) * 0.1)
+                modulation_peaks, _ = signal.find_peaks(
+                    modulation_power, height=np.max(modulation_power) * 0.1
+                )
 
                 if len(modulation_peaks) > 5:
-                    result['detected'] = True
-                    result['confidence'] = max(result['confidence'], 0.6)
-                    result['details'].append({
-                        'channel': channel_idx,
-                        'modulation_peaks': len(modulation_peaks),
-                        'max_modulation_power': float(np.max(modulation_power)),
-                        'type': 'amplitude_modulation'
-                    })
+                    result["detected"] = True
+                    result["confidence"] = max(result["confidence"], 0.6)
+                    result["details"].append(
+                        {
+                            "channel": channel_idx,
+                            "modulation_peaks": len(modulation_peaks),
+                            "max_modulation_power": float(np.max(modulation_power)),
+                            "type": "amplitude_modulation",
+                        }
+                    )
 
         return result
 
-    def detect_frequency_domain_watermarks(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def detect_frequency_domain_watermarks(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         Detect frequency domain watermarks using advanced spectral analysis
 
@@ -397,7 +456,7 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {'detected': False, 'confidence': 0.0, 'details': []}
+        result = {"detected": False, "confidence": 0.0, "details": []}
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -406,7 +465,9 @@ class WatermarkDetector:
             window_sizes = [512, 1024, 2048, 4096]
 
             for window_size in window_sizes:
-                f, t, Zxx = signal.stft(channel_data, fs=sample_rate, nperseg=window_size)
+                f, t, Zxx = signal.stft(
+                    channel_data, fs=sample_rate, nperseg=window_size
+                )
                 magnitude = np.abs(Zxx)
 
                 # Look for watermark signatures across different resolutions
@@ -417,34 +478,45 @@ class WatermarkDetector:
                 avg_flatness = np.mean(spectral_flatness)
 
                 if avg_flatness > 0.3:  # Suspiciously flat spectrum
-                    result['detected'] = True
-                    result['confidence'] = max(result['confidence'], 0.5)
-                    result['details'].append({
-                        'channel': channel_idx,
-                        'window_size': window_size,
-                        'spectral_flatness': avg_flatness,
-                        'type': 'spectral_flatness_anomaly'
-                    })
+                    result["detected"] = True
+                    result["confidence"] = max(result["confidence"], 0.5)
+                    result["details"].append(
+                        {
+                            "channel": channel_idx,
+                            "window_size": window_size,
+                            "spectral_flatness": avg_flatness,
+                            "type": "spectral_flatness_anomaly",
+                        }
+                    )
 
                 # Check for suspicious spectral peaks
                 spectral_peaks = []
                 for time_bin in range(magnitude.shape[1]):
                     spectrum = magnitude[:, time_bin]
-                    peaks, properties = signal.find_peaks(spectrum, height=np.max(spectrum) * 0.1)
+                    peaks, properties = signal.find_peaks(
+                        spectrum, height=np.max(spectrum) * 0.1
+                    )
                     spectral_peaks.append(len(peaks))
 
-                peak_consistency = 1.0 - (np.std(spectral_peaks) / (np.mean(spectral_peaks) + 1e-10))
+                raw_peak_consistency = 1.0 - (
+                    np.std(spectral_peaks) / (np.mean(spectral_peaks) + 1e-10)
+                )
+                peak_consistency = max(0.0, min(1.0, raw_peak_consistency))
 
                 if peak_consistency > 0.8:
-                    result['detected'] = True
-                    result['confidence'] = max(result['confidence'], peak_consistency * 0.7)
-                    result['details'].append({
-                        'channel': channel_idx,
-                        'window_size': window_size,
-                        'peak_consistency': peak_consistency,
-                        'avg_peaks': np.mean(spectral_peaks),
-                        'type': 'consistent_spectral_peaks'
-                    })
+                    result["detected"] = True
+                    result["confidence"] = max(
+                        result["confidence"], peak_consistency * 0.7
+                    )
+                    result["details"].append(
+                        {
+                            "channel": channel_idx,
+                            "window_size": window_size,
+                            "peak_consistency": peak_consistency,
+                            "avg_peaks": np.mean(spectral_peaks),
+                            "type": "consistent_spectral_peaks",
+                        }
+                    )
 
         return result
 

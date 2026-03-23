@@ -27,9 +27,14 @@ class AudioSanitizer:
     Main audio sanitization engine that orchestrates all cleaning operations
     """
 
-    def __init__(self, input_file: Path, output_file: Optional[Path] = None,
-                 paranoid_mode: bool = False, config: Dict[str, Any] = None,
-                 output_format: Optional[str] = None):
+    def __init__(
+        self,
+        input_file: Path,
+        output_file: Optional[Path] = None,
+        paranoid_mode: bool = False,
+        config: Dict[str, Any] = None,
+        output_format: Optional[str] = None,
+    ):
         self.input_file = input_file
         self.output_format = self._determine_output_format(output_file, output_format)
         self.output_file = self._resolve_output_file(output_file)
@@ -52,11 +57,11 @@ class AudioSanitizer:
 
         # Status tracking
         self.processing_stats = {
-            'metadata_removed': 0,
-            'watermarks_detected': 0,
-            'watermarks_removed': 0,
-            'quality_loss': 0.0,
-            'processing_time': 0
+            "metadata_removed": 0,
+            "watermarks_detected": 0,
+            "watermarks_removed": 0,
+            "quality_loss": 0.0,
+            "processing_time": 0,
         }
 
     def _generate_output_path(self, output_format: Optional[str] = None) -> Path:
@@ -78,14 +83,12 @@ class AudioSanitizer:
         try:
             # Try librosa first (best for analysis)
             self.audio_data, self.sample_rate = librosa.load(
-                str(self.input_file),
-                sr=None,
-                mono=True  # Load as mono for consistency
+                str(self.input_file), sr=None, mono=True  # Load as mono for consistency
             )
             self.audio_data = self._ensure_channel_layout(self.audio_data)
 
             # Calculate original hash
-            with open(self.input_file, 'rb') as f:
+            with open(self.input_file, "rb") as f:
                 self.original_hash = hashlib.sha256(f.read()).hexdigest()
 
             return True
@@ -105,7 +108,7 @@ class AudioSanitizer:
                 self.audio_data = self._ensure_channel_layout(self.audio_data)
 
                 # Calculate hash
-                with open(self.input_file, 'rb') as f:
+                with open(self.input_file, "rb") as f:
                     self.original_hash = hashlib.sha256(f.read()).hexdigest()
 
                 return True
@@ -127,48 +130,66 @@ class AudioSanitizer:
             raise Exception("Failed to load audio file")
 
         analysis = {
-            'file_info': {
-                'path': str(self.input_file),
-                'size': self.input_file.stat().st_size,
-                'hash': self.original_hash,
-                'format': self.input_file.suffix.lower(),
-                'duration': len(self.audio_data) / self.sample_rate if self.sample_rate else 0,
-                'sample_rate': self.sample_rate,
-                'channels': 1 if self.audio_data.ndim == 1 else self.audio_data.shape[1]
+            "file_info": {
+                "path": str(self.input_file),
+                "size": self.input_file.stat().st_size,
+                "hash": self.original_hash,
+                "format": self.input_file.suffix.lower(),
+                "duration": (
+                    len(self.audio_data) / self.sample_rate if self.sample_rate else 0
+                ),
+                "sample_rate": self.sample_rate,
+                "channels": (
+                    1 if self.audio_data.ndim == 1 else self.audio_data.shape[1]
+                ),
             }
         }
 
         # Metadata analysis
         metadata_analysis = self.metadata_scanner.scan_file(self.input_file)
-        analysis['metadata'] = metadata_analysis
+        analysis["metadata"] = metadata_analysis
 
         # Watermark detection
-        watermark_analysis = self.watermark_detector.detect_all(self.audio_data, self.sample_rate)
-        analysis['watermarks'] = watermark_analysis
+        watermark_analysis = self.watermark_detector.detect_all(
+            self.audio_data, self.sample_rate
+        )
+        analysis["watermarks"] = watermark_analysis
 
         # Statistical analysis (if deep scan requested)
         if deep:
-            statistical_analysis = self.statistical_analyzer.analyze(self.audio_data, self.sample_rate)
-            analysis['statistical'] = statistical_analysis
+            statistical_analysis = self.statistical_analyzer.analyze(
+                self.audio_data, self.sample_rate
+            )
+            analysis["statistical"] = statistical_analysis
 
             # Calculate threat level
             threat_score = self._calculate_threat_level(analysis)
-            analysis['threat_level'] = threat_score
+            analysis["threat_level"] = threat_score
         else:
-            analysis['threat_level'] = 'UNKNOWN'
+            analysis["threat_level"] = "UNKNOWN"
 
-        # Count total threats
-        analysis['threats_found'] = (
-            len(analysis['metadata'].get('tags', [])) +
-            len(analysis['watermarks'].get('detected', [])) +
-            len(analysis.get('statistical', {}).get('anomalies', []))
+        # Count total threats — only genuinely suspicious findings
+        suspicious_tags = [
+            t
+            for t in analysis["metadata"].get("tags", [])
+            if isinstance(t, dict) and t.get("suspicious")
+        ]
+        analysis["threats_found"] = (
+            len(suspicious_tags)
+            + len(analysis["metadata"].get("suspicious_chunks", []))
+            + len(analysis["watermarks"].get("detected", []))
+            + len(analysis.get("statistical", {}).get("anomalies", []))
         )
 
         return analysis
 
     def _calculate_threat_level(self, analysis: Dict[str, Any]) -> str:
         """
-        Calculate overall threat level based on analysis results
+        Calculate overall threat level based on analysis results.
+
+        Only count genuinely suspicious findings — standard metadata tags
+        (artist, title, album) and normal audio container structure are NOT
+        threats.
 
         Args:
             analysis: Analysis results from analyze_file()
@@ -178,23 +199,30 @@ class AudioSanitizer:
         """
         threat_score = 0
 
-        # Metadata threats
-        threat_score += len(analysis['metadata'].get('tags', [])) * 1
-        threat_score += len(analysis['metadata'].get('suspicious_chunks', [])) * 2
+        # Only count *suspicious* metadata tags (not standard artist/title)
+        suspicious_tags = [
+            t
+            for t in analysis["metadata"].get("tags", [])
+            if isinstance(t, dict) and t.get("suspicious")
+        ]
+        threat_score += len(suspicious_tags) * 1
 
-        # Watermark threats
-        threat_score += len(analysis['watermarks'].get('detected', [])) * 3
+        # Suspicious chunks that remain after the de-noised scanner
+        threat_score += len(analysis["metadata"].get("suspicious_chunks", [])) * 2
 
-        # Statistical threats
-        threat_score += len(analysis.get('statistical', {}).get('anomalies', [])) * 2
+        # Watermark detections (the most meaningful signal)
+        threat_score += len(analysis["watermarks"].get("detected", [])) * 3
+
+        # Statistical anomalies
+        threat_score += len(analysis.get("statistical", {}).get("anomalies", [])) * 1
 
         # Determine threat level
         if threat_score >= 10:
-            return 'HIGH'
+            return "HIGH"
         elif threat_score >= 5:
-            return 'MEDIUM'
+            return "MEDIUM"
         else:
-            return 'LOW'
+            return "LOW"
 
     def sanitize_audio(self) -> Dict[str, Any]:
         """
@@ -204,12 +232,16 @@ class AudioSanitizer:
             Dict containing sanitization results
         """
         import time
+
         start_time = time.time()
 
         try:
             # Load and analyze
             if not self.load_audio():
-                raise Exception("Failed to load audio file")
+                raise RuntimeError(
+                    "Failed to load audio file — the file may be corrupt "
+                    "or in an unsupported format"
+                )
 
             analysis = self.analyze_file(deep=True)
 
@@ -218,25 +250,44 @@ class AudioSanitizer:
 
             # Phase 1: Metadata removal
             self._info("Phase 1: Metadata annihilation...")
-            metadata_result = self.metadata_cleaner.clean_file(self.input_file, self.output_file)
-            self.processing_stats['metadata_removed'] = metadata_result['tags_removed']
+            metadata_result = self.metadata_cleaner.clean_file(
+                self.input_file, self.output_file
+            )
+            if not metadata_result.get("success", True):
+                self._info(
+                    f"Metadata cleaning reported issues: "
+                    f"{metadata_result.get('errors', [])}"
+                )
+            self.processing_stats["metadata_removed"] = metadata_result.get(
+                "tags_removed", 0
+            )
 
             # Reload clean audio for further processing
             if self.output_file.exists():
-                sanitized_audio, self.sample_rate = librosa.load(str(self.output_file), sr=None, mono=False)
+                sanitized_audio, self.sample_rate = librosa.load(
+                    str(self.output_file), sr=None, mono=False
+                )
                 sanitized_audio = self._ensure_channel_layout(sanitized_audio)
 
             # Phase 2: Spectral watermark removal
             self._info("Phase 2: Spectral watermark elimination...")
-            spectral_result = self.spectral_cleaner.clean_watermarks(sanitized_audio, self.sample_rate)
-            sanitized_audio = spectral_result['cleaned_audio']
-            self.processing_stats['patterns_found'] = spectral_result['watermarks_found']
-            self.processing_stats['patterns_suppressed'] = spectral_result['watermarks_removed']
+            spectral_result = self.spectral_cleaner.clean_watermarks(
+                sanitized_audio, self.sample_rate
+            )
+            sanitized_audio = spectral_result["cleaned_audio"]
+            self.processing_stats["patterns_found"] = spectral_result[
+                "watermarks_found"
+            ]
+            self.processing_stats["patterns_suppressed"] = spectral_result[
+                "watermarks_removed"
+            ]
 
             # Phase 3: Statistical fingerprint removal
             self._info("Phase 3: Statistical fingerprint destruction...")
-            fingerprint_result = self.fingerprint_remover.remove_fingerprints(sanitized_audio, self.sample_rate)
-            sanitized_audio = fingerprint_result['cleaned_audio']
+            fingerprint_result = self.fingerprint_remover.remove_fingerprints(
+                sanitized_audio, self.sample_rate
+            )
+            sanitized_audio = fingerprint_result["cleaned_audio"]
 
             # Phase 4: Final cleanup and quality preservation
             self._info("Phase 4: Final sanitization...")
@@ -249,27 +300,25 @@ class AudioSanitizer:
             self._save_audio(sanitized_audio)
 
             # Calculate quality metrics
-            self.processing_stats['quality_loss'] = self._calculate_quality_loss()
-            self.processing_stats['processing_time'] = time.time() - start_time
+            self.processing_stats["quality_loss"] = self._calculate_quality_loss()
+            self.processing_stats["processing_time"] = time.time() - start_time
 
             # Verify output
             final_hash = self._calculate_file_hash(self.output_file)
 
             return {
-                'success': True,
-                'output_file': str(self.output_file),
-                'original_hash': self.original_hash,
-                'final_hash': final_hash,
-                'stats': self.processing_stats,
-                'analysis': analysis
+                "success": True,
+                "output_file": str(self.output_file),
+                "original_hash": self.original_hash,
+                "final_hash": final_hash,
+                "stats": self.processing_stats,
+                "analysis": analysis,
             }
 
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'stats': self.processing_stats
-            }
+            # Always record how much time elapsed, even on failure
+            self.processing_stats["processing_time"] = time.time() - start_time
+            return {"success": False, "error": str(e), "stats": self.processing_stats}
 
     def _paranoid_pass(self, audio_data: np.ndarray) -> np.ndarray:
         """
@@ -320,34 +369,40 @@ class AudioSanitizer:
         if max_val > 1.0:
             audio_data = audio_data / max_val
 
-        target_format = (self.output_format or self.output_file.suffix.lstrip('.')).lower()
+        target_format = (
+            self.output_format or self.output_file.suffix.lstrip(".")
+        ).lower()
         audio_int16 = np.clip(audio_data * 32767, -32768, 32767).astype(np.int16)
 
-        if target_format == 'mp3':
+        if target_format == "mp3":
             channels = audio_int16.shape[1] if audio_int16.ndim > 1 else 1
             segment = AudioSegment(
                 audio_int16.tobytes(),
                 frame_rate=self.sample_rate,
                 sample_width=2,
-                channels=channels
+                channels=channels,
             )
             segment.export(
                 str(self.output_file),
-                format='mp3',
-                bitrate='320k',
+                format="mp3",
+                bitrate="320k",
                 parameters=[
-                    '-map_metadata', '-1',
-                    '-write_xing', '0',
-                    '-id3v2_version', '0',
-                    '-write_id3v1', '0'
-                ]  # ensure no metadata or encoder info is re-added
+                    "-map_metadata",
+                    "-1",
+                    "-write_xing",
+                    "0",
+                    "-id3v2_version",
+                    "0",
+                    "-write_id3v1",
+                    "0",
+                ],  # ensure no metadata or encoder info is re-added
             )
         else:
             sf.write(
                 str(self.output_file),
                 audio_int16,
                 self.sample_rate,
-                format=target_format.upper()
+                format=target_format.upper(),
             )
 
     def _calculate_quality_loss(self) -> float:
@@ -364,8 +419,8 @@ class AudioSanitizer:
 
             # Calculate SNR
             noise = original_audio - clean_audio
-            signal_power = np.mean(original_audio ** 2)
-            noise_power = np.mean(noise ** 2)
+            signal_power = np.mean(original_audio**2)
+            noise_power = np.mean(noise**2)
 
             if noise_power > 0:
                 snr_db = 10 * np.log10(signal_power / noise_power)
@@ -380,7 +435,7 @@ class AudioSanitizer:
 
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA256 hash of file"""
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
 
     def verify_sanitization(self) -> Dict[str, Any]:
@@ -392,36 +447,40 @@ class AudioSanitizer:
         """
         try:
             # Re-analyze the sanitized file
-            sanitizer = AudioSanitizer(self.output_file, paranoid_mode=self.paranoid_mode)
+            sanitizer = AudioSanitizer(
+                self.output_file, paranoid_mode=self.paranoid_mode
+            )
             new_analysis = sanitizer.analyze_file(deep=True)
 
             # Compare with original
-            original_threats = self.processing_stats['metadata_removed'] + \
-                             self.processing_stats['watermarks_detected']
-            new_threats = new_analysis['threats_found']
+            original_threats = (
+                self.processing_stats["metadata_removed"]
+                + self.processing_stats["watermarks_detected"]
+            )
+            new_threats = new_analysis["threats_found"]
 
             removal_effectiveness = 0
             if original_threats > 0:
-                removal_effectiveness = ((original_threats - new_threats) / original_threats) * 100
+                removal_effectiveness = (
+                    (original_threats - new_threats) / original_threats
+                ) * 100
 
             return {
-                'success': True,
-                'original_threats': original_threats,
-                'remaining_threats': new_threats,
-                'removal_effectiveness': round(removal_effectiveness, 2),
-                'new_analysis': new_analysis,
-                'hash_different': self.original_hash != self._calculate_file_hash(self.output_file)
+                "success": True,
+                "original_threats": original_threats,
+                "remaining_threats": new_threats,
+                "removal_effectiveness": round(removal_effectiveness, 2),
+                "new_analysis": new_analysis,
+                "hash_different": self.original_hash
+                != self._calculate_file_hash(self.output_file),
             }
 
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     def create_backup(self):
         """Create backup of original file"""
-        backup_path = self.input_file.with_suffix(f'.backup{self.input_file.suffix}')
+        backup_path = self.input_file.with_suffix(f".backup{self.input_file.suffix}")
         shutil.copy2(self.input_file, backup_path)
         self.metadata_crimes.append(f"Created backup: {backup_path}")
 
@@ -429,24 +488,26 @@ class AudioSanitizer:
         """Internal info logging"""
         self.metadata_crimes.append(message)
 
-    def _determine_output_format(self, output_file: Optional[Path], output_format: Optional[str]) -> str:
+    def _determine_output_format(
+        self, output_file: Optional[Path], output_format: Optional[str]
+    ) -> str:
         """
         Decide which audio format to use for saving.
 
         Priority: explicit output_format arg -> output_file suffix -> input file suffix.
         """
-        normalized_format = (output_format or '').lower().lstrip('.')
-        if normalized_format == 'preserve':
-            normalized_format = ''
+        normalized_format = (output_format or "").lower().lstrip(".")
+        if normalized_format == "preserve":
+            normalized_format = ""
 
         if normalized_format:
             return normalized_format
 
         if output_file and output_file.suffix:
-            return output_file.suffix.lstrip('.').lower()
+            return output_file.suffix.lstrip(".").lower()
 
         # Fallback to input file extension
-        return self.input_file.suffix.lstrip('.').lower() or 'wav'
+        return self.input_file.suffix.lstrip(".").lower() or "wav"
 
     def _resolve_output_file(self, output_file: Optional[Path]) -> Path:
         """Ensure the output path matches the chosen format."""

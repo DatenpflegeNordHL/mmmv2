@@ -5,7 +5,10 @@ Optimized processor with CPU multi-threading and GPU acceleration
 import os
 import numpy as np
 import librosa
-import cupy as cp  # GPU acceleration
+try:
+    import cupy as cp  # GPU acceleration — optional
+except ImportError:
+    cp = None
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -16,10 +19,13 @@ from functools import partial
 # Check GPU availability
 try:
     import torch
+
     GPU_AVAILABLE = torch.cuda.is_available()
     if GPU_AVAILABLE:
         print(f"🚀 GPU Detected: {torch.cuda.get_device_name(0)}")
-        print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+        print(
+            f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB"
+        )
 except ImportError:
     GPU_AVAILABLE = False
     print("💻 GPU not available, using CPU-only mode")
@@ -38,26 +44,31 @@ class OptimizedAudioProcessor:
         print(f"🔧 Initialized processor:")
         print(f"   CPU cores: {self.num_cores}")
         print(f"   GPU acceleration: {'Enabled' if self.use_gpu else 'Disabled'}")
-        print(f"   Multiprocessing: {'Enabled' if self.use_multiprocessing else 'Disabled'}")
+        print(
+            f"   Multiprocessing: {'Enabled' if self.use_multiprocessing else 'Disabled'}"
+        )
 
-    def load_audio_optimized(self, file_path: Path, sample_rate: int = None) -> Tuple[np.ndarray, int]:
+    def load_audio_optimized(
+        self, file_path: Path, sample_rate: int = None
+    ) -> Tuple[np.ndarray, int]:
         """
         Load audio with optimized parameters
         """
         # Use librosa's efficient loading
         y, sr = librosa.load(
-            str(file_path),
-            sr=sample_rate,
-            mono=True,
-            dtype=np.float32
+            str(file_path), sr=sample_rate, mono=True, dtype=np.float32
         )
 
         return y, sr
 
-    def process_in_chunks(self, audio_data: np.ndarray, sample_rate: int,
-                           chunk_duration: float = 10.0,
-                           chunk_overlap: float = 1.0,
-                           process_func=None) -> List[Any]:
+    def process_in_chunks(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        chunk_duration: float = 10.0,
+        chunk_overlap: float = 1.0,
+        process_func=None,
+    ) -> List[Any]:
         """
         Process audio in parallel chunks using all available cores
         """
@@ -86,8 +97,9 @@ class OptimizedAudioProcessor:
 
         return results
 
-    def detect_watermarks_parallel(self, audio_data: np.ndarray, sample_rate: int,
-                                   chunk_duration: float = 15.0) -> Dict[str, Any]:
+    def detect_watermarks_parallel(
+        self, audio_data: np.ndarray, sample_rate: int, chunk_duration: float = 15.0
+    ) -> Dict[str, Any]:
         """
         Parallel watermark detection using all CPU cores
         """
@@ -119,31 +131,33 @@ class OptimizedAudioProcessor:
 
         # Aggregate results
         aggregated = {
-            'detected': [],
-            'method_results': {},
-            'confidence_scores': {},
-            'watermark_count': 0,
-            'chunk_count': len(chunks)
+            "detected": [],
+            "method_results": {},
+            "confidence_scores": {},
+            "watermark_count": 0,
+            "chunk_count": len(chunks),
         }
 
         total_confidence = 0
         for i, result in enumerate(results):
-            if 'error' not in result:
-                aggregated['detected'].extend(result.get('detected', []))
-                aggregated['watermark_count'] += result.get('watermark_count', 0)
-                total_confidence += result.get('overall_confidence', 0)
+            if "error" not in result:
+                aggregated["detected"].extend(result.get("detected", []))
+                aggregated["watermark_count"] += result.get("watermark_count", 0)
+                total_confidence += result.get("overall_confidence", 0)
 
-        aggregated['overall_confidence'] = total_confidence / len(results) if results else 0
+        aggregated["overall_confidence"] = (
+            total_confidence / len(results) if results else 0
+        )
 
         return aggregated
 
-    def gpu_accelerated_stft(self, audio_data: np.ndarray,
-                             n_fft: int = 2048,
-                             hop_length: int = 512) -> np.ndarray:
+    def gpu_accelerated_stft(
+        self, audio_data: np.ndarray, n_fft: int = 2048, hop_length: int = 512
+    ) -> np.ndarray:
         """
         GPU-accelerated STFT using CuPy
         """
-        if not self.use_gpu:
+        if not self.use_gpu or cp is None:
             # Fallback to librosa CPU version
             return librosa.stft(audio_data, n_fft=n_fft, hop_length=hop_length)
 
@@ -172,7 +186,7 @@ class OptimizedAudioProcessor:
         librosa.set_max_threads(self.num_cores)
 
         # Set thread affinity for better performance
-        if hasattr(os, 'sched_setaffinity'):
+        if hasattr(os, "sched_setaffinity"):
             pid = os.getpid()
             os.sched_setaffinity(pid, range(self.num_cores))
 
@@ -186,21 +200,31 @@ class GPUAcceleratedWatermarkDetector:
 
     def __init__(self):
         self.gpu_available = GPU_AVAILABLE
+        self.num_cores = mp.cpu_count()
         if self.gpu_available:
             import torch
-            self.device = torch.device('cuda')
-            print(f"🚀 GPU Watermark Detector Initialized on {torch.cuda.get_device_name()}")
+
+            self.device = torch.device("cuda")
+            print(
+                f"🚀 GPU Watermark Detector Initialized on {torch.cuda.get_device_name()}"
+            )
         else:
             self.device = None
             print("💻 GPU not available, using CPU mode")
 
-    def detect_spectral_patterns_gpu(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def detect_spectral_patterns_gpu(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         GPU-accelerated spectral pattern detection
         """
         if not self.gpu_available:
             # Fallback to CPU implementation
             from .detection.watermark_detector import WatermarkDetector
+
+            # detect_spread_spectrum expects (samples, channels)
+            if audio_data.ndim == 1:
+                audio_data = np.expand_dims(audio_data, axis=1)
             detector = WatermarkDetector()
             return detector.detect_spread_spectrum(audio_data, sample_rate)
 
@@ -214,7 +238,7 @@ class GPUAcceleratedWatermarkDetector:
         magnitude = torch.abs(fft_tensor)
 
         # Create frequency array
-        freqs = torch.fft.fftfreq(len(audio_tensor), 1/sample_rate)
+        freqs = torch.fft.fftfreq(len(audio_tensor), 1 / sample_rate)
 
         # GPU-based high frequency analysis
         high_freq_mask = torch.abs(freqs) > 15000
@@ -224,14 +248,16 @@ class GPUAcceleratedWatermarkDetector:
         threshold = torch.median(magnitude) * 5
         suspicious = high_freq_power > threshold
 
+        raw_confidence = float(high_freq_power / threshold) if threshold > 0 else 0.0
         return {
-            'detected': suspicious,
-            'confidence': float(high_freq_power / threshold) if threshold > 0 else 0.0,
-            'details': ['GPU-accelerated spectral analysis']
+            "detected": suspicious,
+            "confidence": max(0.0, min(1.0, raw_confidence)),
+            "details": ["GPU-accelerated spectral analysis"],
         }
 
-    def batch_process_files(self, file_paths: List[Path],
-                           chunk_duration: float = 30.0) -> List[Dict[str, Any]]:
+    def batch_process_files(
+        self, file_paths: List[Path], chunk_duration: float = 30.0
+    ) -> List[Dict[str, Any]]:
         """
         Process multiple files in parallel using GPU batch processing
         """
@@ -247,7 +273,9 @@ class GPUAcceleratedWatermarkDetector:
                 futures = []
                 for file_path in file_paths:
                     sanitizer = AudioSanitizer(file_path, config=config_manager.config)
-                    futures.append(executor.submit(self._analyze_single_file, sanitizer))
+                    futures.append(
+                        executor.submit(self._analyze_single_file, sanitizer)
+                    )
 
                 results = [f.result() for f in futures]
                 return results
@@ -259,13 +287,13 @@ class GPUAcceleratedWatermarkDetector:
         results = []
 
         for i in range(0, len(file_paths), batch_size):
-            batch_files = file_paths[i:i+batch_size]
+            batch_files = file_paths[i : i + batch_size]
 
             # Load batch to GPU (small chunks)
             batch_audio = []
             for file_path in batch_files:
                 y, sr = librosa.load(str(file_path), sr=48000, mono=True)
-                chunk = y[:int(chunk_duration * sr)]
+                chunk = y[: int(chunk_duration * sr)]
                 batch_audio.append(chunk)
 
             # Pad to same length
@@ -273,11 +301,13 @@ class GPUAcceleratedWatermarkDetector:
             padded_batch = []
             for audio in batch_audio:
                 padded = np.zeros(max_len)
-                padded[:len(audio)] = audio
+                padded[: len(audio)] = audio
                 padded_batch.append(padded)
 
             # Convert to tensor batch
-            batch_tensor = torch.from_numpy(np.array(padded_batch)).float().to(self.device)
+            batch_tensor = (
+                torch.from_numpy(np.array(padded_batch)).float().to(self.device)
+            )
 
             # GPU processing
             fft_batch = torch.fft.fft(batch_tensor, dim=1)
@@ -286,29 +316,33 @@ class GPUAcceleratedWatermarkDetector:
             # Analyze results
             for j, file_path in enumerate(batch_files):
                 mag = magnitude_batch[j].cpu().numpy()
-                results.append({
-                    'file': str(file_path),
-                    'gpu_processed': True,
-                    'spectral_energy': np.mean(mag),
-                    'high_freq_content': np.mean(mag[len(mag)//4:]),
-                })
+                results.append(
+                    {
+                        "file": str(file_path),
+                        "gpu_processed": True,
+                        "spectral_energy": np.mean(mag),
+                        "high_freq_content": np.mean(mag[len(mag) // 4 :]),
+                    }
+                )
 
         return results
 
     def _analyze_single_file(self, sanitizer):
         """Helper for CPU fallback"""
         try:
-            analysis = sanitizer.analyze_file(deep=False)  # Skip heavy statistical analysis
+            analysis = sanitizer.analyze_file(
+                deep=False
+            )  # Skip heavy statistical analysis
             return {
-                'success': True,
-                'file': str(sanitizer.input_file),
-                'analysis': analysis
+                "success": True,
+                "file": str(sanitizer.input_file),
+                "analysis": analysis,
             }
         except Exception as e:
             return {
-                'success': False,
-                'file': str(sanitizer.input_file),
-                'error': str(e)
+                "success": False,
+                "file": str(sanitizer.input_file),
+                "error": str(e),
             }
 
 
@@ -320,12 +354,13 @@ def optimize_system():
     import os
 
     # Set environment variables for better performance
-    os.environ['OMP_NUM_THREADS'] = str(mp.cpu_count())
-    os.environ['MKL_NUM_THREADS'] = str(mp.cpu_count())
-    os.environ['NUMBA_NUM_THREADS'] = str(mp.cpu_count())
+    os.environ["OMP_NUM_THREADS"] = str(mp.cpu_count())
+    os.environ["MKL_NUM_THREADS"] = str(mp.cpu_count())
+    os.environ["NUMBA_NUM_THREADS"] = str(mp.cpu_count())
 
     # Optimize numpy
     import numpy as np
+
     np.set_printoptions(threshold=100)  # Less printing overhead
 
     print(f"⚡ System optimized for {mp.cpu_count()} CPU cores")
@@ -333,8 +368,12 @@ def optimize_system():
     # Check NVIDIA GPU details
     try:
         import subprocess
-        result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total,memory.free'],
-                              capture_output=True, text=True)
+
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total,memory.free"],
+            capture_output=True,
+            text=True,
+        )
         if result.returncode == 0:
             print("🎮 NVIDIA GPU Status:")
             print(result.stdout)

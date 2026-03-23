@@ -4,7 +4,8 @@ Turbo Analysis - GPU + Multi-core CPU optimization
 """
 
 import sys
-sys.path.insert(0, '/home/geeknik/dev/mmm')
+
+sys.path.insert(0, "/home/geeknik/dev/mmm")
 
 import os
 import librosa
@@ -15,12 +16,16 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 from mmm.detection.metadata_scanner import MetadataScanner
-from mmm.optimized_processor import OptimizedAudioProcessor, GPUAcceleratedWatermarkDetector
+from mmm.optimized_processor import (
+    OptimizedAudioProcessor,
+    GPUAcceleratedWatermarkDetector,
+)
 
 # Optimize for all CPU cores
-os.environ['OMP_NUM_THREADS'] = str(mp.cpu_count())
-os.environ['MKL_NUM_THREADS'] = str(mp.cpu_count())
-os.environ['NUMBA_NUM_THREADS'] = str(mp.cpu_count())
+os.environ["OMP_NUM_THREADS"] = str(mp.cpu_count())
+os.environ["MKL_NUM_THREADS"] = str(mp.cpu_count())
+os.environ["NUMBA_NUM_THREADS"] = str(mp.cpu_count())
+
 
 def analyze_audio_chunk_gpu(args):
     """
@@ -30,11 +35,11 @@ def analyze_audio_chunk_gpu(args):
     audio_chunk, sample_rate, chunk_id, chunk_start_time = args
 
     results = {
-        'chunk_id': chunk_id,
-        'chunk_start_time': chunk_start_time,
-        'watermarks': None,
-        'error': None,
-        'processing_time': 0
+        "chunk_id": chunk_id,
+        "chunk_start_time": chunk_start_time,
+        "watermarks": None,
+        "error": None,
+        "processing_time": 0,
     }
 
     try:
@@ -45,17 +50,18 @@ def analyze_audio_chunk_gpu(args):
         # Use spectral pattern detection (fastest GPU method)
         gpu_result = gpu_detector.detect_spectral_patterns_gpu(audio_chunk, sample_rate)
 
-        results['processing_time'] = time.time() - start_time
-        results['watermarks'] = {
-            'detected': gpu_result['detected'],
-            'confidence': gpu_result['confidence'],
-            'method': 'gpu_spectral'
+        results["processing_time"] = time.time() - start_time
+        results["watermarks"] = {
+            "detected": gpu_result["detected"],
+            "confidence": gpu_result["confidence"],
+            "method": "gpu_spectral",
         }
 
     except Exception as e:
-        results['error'] = str(e)
+        results["error"] = str(e)
 
     return results
+
 
 def turbo_analysis(file_path, chunk_duration=5.0):
     """
@@ -94,10 +100,12 @@ def turbo_analysis(file_path, chunk_duration=5.0):
         end = min(i + chunk_samples, len(audio))
         chunk = audio[i:end]
         chunks.append(chunk)
-        chunk_positions.append((i/sr, end/sr))
+        chunk_positions.append((i / sr, end / sr))
 
     # Prepare arguments for parallel processing
-    args_list = [(chunk, sr, i, chunk_positions[i][0]) for i, chunk in enumerate(chunks)]
+    args_list = [
+        (chunk, sr, i, chunk_positions[i][0]) for i, chunk in enumerate(chunks)
+    ]
 
     # Process in parallel using both GPU and CPU cores
     print(f"🔥 Processing chunks with GPU acceleration...")
@@ -127,19 +135,19 @@ def turbo_analysis(file_path, chunk_duration=5.0):
     processing_times = []
 
     for result in chunk_results:
-        if result['watermarks']:
-            processing_times.append(result['processing_time'])
-            if result['watermarks']['detected']:
+        if result["watermarks"]:
+            processing_times.append(result["processing_time"])
+            if result["watermarks"]["detected"]:
                 gpu_watermarks_detected += 1
-            total_confidence += result['watermarks']['confidence']
+            total_confidence += result["watermarks"]["confidence"]
 
     avg_confidence = total_confidence / len(chunk_results) if chunk_results else 0
     avg_chunk_time = np.mean(processing_times) if processing_times else 0
 
     # Display results
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🎯 TURBO ANALYSIS RESULTS")
-    print("="*60)
+    print("=" * 60)
 
     print(f"\n📁 File: {file_path}")
     print(f"   Size: {Path(file_path).stat().st_size/1024/1024:.1f} MB")
@@ -150,9 +158,9 @@ def turbo_analysis(file_path, chunk_duration=5.0):
     print(f"   Suspicious chunks: {len(metadata['suspicious_chunks'])}")
     print(f"   Hidden patterns: {len(metadata['hidden_data'])}")
 
-    if metadata['tags']:
-        for tag in metadata['tags'][:3]:
-            suspicious = "🚨" if tag['suspicious'] else "✅"
+    if metadata["tags"]:
+        for tag in metadata["tags"][:3]:
+            suspicious = "🚨" if tag["suspicious"] else "✅"
             print(f"      {suspicious} {tag['key']}")
 
     print(f"\n🚀 GPU Watermark Analysis:")
@@ -169,12 +177,17 @@ def turbo_analysis(file_path, chunk_duration=5.0):
     print(f"   CPU cores utilized: {min(mp.cpu_count(), 4)}")
     print(f"   Throughput: {(total_duration/elapsed)*60:.1f} audio-minutes/min")
 
-    # Calculate threat level
+    # Calculate threat level — only count genuinely suspicious findings
+    suspicious_tags = [
+        t
+        for t in metadata.get("tags", [])
+        if isinstance(t, dict) and t.get("suspicious")
+    ]
     total_threats = (
-        len(metadata['tags']) +
-        len(metadata['suspicious_chunks']) +
-        len(metadata['hidden_data']) +
-        gpu_watermarks_detected
+        len(suspicious_tags)
+        + len(metadata["suspicious_chunks"])
+        + len(metadata["hidden_data"])
+        + gpu_watermarks_detected
     )
 
     print(f"\n🚨 THREAT LEVEL: ", end="")
@@ -185,42 +198,55 @@ def turbo_analysis(file_path, chunk_duration=5.0):
     elif total_threats > 5:
         print("🟡 MEDIUM - Some AI traces detected")
     else:
-        print("🟢 LOW")
+        print("🟢 LOW - No significant AI markers detected")
 
     print(f"   Total threats: {total_threats}")
 
     return {
-        'file_info': {
-            'path': str(file_path),
-            'size': Path(file_path).stat().st_size,
-            'format': Path(file_path).suffix.lstrip('.').upper(),
-            'duration': total_duration,
-            'sample_rate': sr,
-            'channels': audio.shape[1] if audio.ndim > 1 else 1
+        "file_info": {
+            "path": str(file_path),
+            "size": Path(file_path).stat().st_size,
+            "format": Path(file_path).suffix.lstrip(".").upper(),
+            "duration": total_duration,
+            "sample_rate": sr,
+            "channels": audio.shape[1] if audio.ndim > 1 else 1,
         },
-        'metadata': metadata,
-        'gpu_watermarks': {
-            'detected': [{'method': 'gpu', 'confidence': avg_confidence}] if gpu_watermarks_detected else [],
-            'total_count': gpu_watermarks_detected,
-            'avg_confidence': avg_confidence,
-            'chunks_processed': len(chunk_results),
-            'overall_confidence': avg_confidence
+        "metadata": metadata,
+        "gpu_watermarks": {
+            "detected": (
+                [{"method": "gpu", "confidence": avg_confidence}]
+                if gpu_watermarks_detected
+                else []
+            ),
+            "total_count": gpu_watermarks_detected,
+            "avg_confidence": avg_confidence,
+            "chunks_processed": len(chunk_results),
+            "overall_confidence": avg_confidence,
         },
-        'performance': {
-            'loading_time': load_time,
-            'processing_time': elapsed,
-            'realtime_factor': total_duration/elapsed if elapsed else 0,
-            'avg_chunk_time': avg_chunk_time
+        "performance": {
+            "loading_time": load_time,
+            "processing_time": elapsed,
+            "realtime_factor": total_duration / elapsed if elapsed else 0,
+            "avg_chunk_time": avg_chunk_time,
         },
-        'total_threats': total_threats,
-        'threat_level': 'HIGH' if total_threats > 10 else 'MEDIUM' if total_threats > 5 else 'LOW'
+        "total_threats": total_threats,
+        "threat_level": (
+            "VERY HIGH"
+            if total_threats > 20
+            else "HIGH"
+            if total_threats > 10
+            else "MEDIUM"
+            if total_threats > 5
+            else "LOW"
+        ),
     }
+
 
 def main():
     """Main function"""
     print("🚀 MMM Turbo Analysis - GPU + Multi-Core Optimization")
     print("🎵 Maximum performance with RTX 3080 Ti")
-    print("="*60)
+    print("=" * 60)
 
     file_path = Path("Schizo Shaman.mp3")
     if not file_path.exists():
@@ -232,6 +258,7 @@ def main():
     print("\n💀 Turbo Analysis Complete!")
     print("   Maximum GPU + CPU performance achieved!")
     print("   Ready for high-speed processing!")
+
 
 if __name__ == "__main__":
     main()
