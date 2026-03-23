@@ -5,7 +5,14 @@ Progress manager for visual feedback during processing
 import time
 import random
 from typing import List, Dict, Any
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+    TimeElapsedColumn,
+)
 from rich.console import Console
 from rich.table import Table
 
@@ -27,7 +34,7 @@ class ProgressManager:
             "Eliminating fingerprints...",
             "Applying final sanitization...",
             "Verifying cleanup...",
-            "Saving cleaned audio..."
+            "Saving cleaned audio...",
         ]
 
         self.paranoid_stages = [
@@ -41,10 +48,12 @@ class ProgressManager:
             "Temporal perturbation...",
             "Human imperfection injection...",
             "Quality verification...",
-            "Secure file saving..."
+            "Secure file saving...",
         ]
 
-    def show_processing_progress(self, paranoid_mode: bool = False, estimated_time: float = 30.0):
+    def show_processing_progress(
+        self, paranoid_mode: bool = False, estimated_time: float = 30.0
+    ):
         """Show detailed processing progress"""
         stages = self.paranoid_stages if paranoid_mode else self.processing_stages
 
@@ -55,7 +64,7 @@ class ProgressManager:
             TaskProgressColumn(),
             TimeElapsedColumn(),
             console=self.console,
-            transient=True
+            transient=True,
         ) as progress:
             tasks = []
             total_stages = len(stages)
@@ -84,7 +93,7 @@ class ProgressManager:
             "basic": [
                 "Reading file headers...",
                 "Scanning metadata tags...",
-                "Checking format compliance..."
+                "Checking format compliance...",
             ],
             "comprehensive": [
                 "Reading file structure...",
@@ -93,7 +102,7 @@ class ProgressManager:
                 "Statistical profiling...",
                 "Watermark detection...",
                 "Fingerprint analysis...",
-                "Threat assessment..."
+                "Threat assessment...",
             ],
             "forensic": [
                 "File structure mapping...",
@@ -104,8 +113,8 @@ class ProgressManager:
                 "Cryptographic analysis...",
                 "Statistical anomaly detection...",
                 "Cross-format validation...",
-                "Integrity verification..."
-            ]
+                "Integrity verification...",
+            ],
         }
 
         stages = analysis_stages.get(analysis_type, analysis_stages["comprehensive"])
@@ -114,14 +123,16 @@ class ProgressManager:
             SpinnerColumn(),
             TextColumn("[yellow]Analyzing: {task.description}"),
             console=self.console,
-            transient=True
+            transient=True,
         ) as progress:
             for stage in stages:
                 task = progress.add_task(stage, total=None)
                 time.sleep(random.uniform(0.5, 2.0))  # Variable timing for realism
                 progress.update(task, completed=True)
 
-    def show_batch_progress(self, files: List[str], current_index: int, current_file: str):
+    def show_batch_progress(
+        self, files: List[str], current_index: int, current_file: str
+    ):
         """Show progress for batch processing"""
         total_files = len(files)
         progress_percent = (current_index / total_files) * 100
@@ -133,7 +144,7 @@ class ProgressManager:
 
         table.add_row(
             f"[{'█' * int(progress_percent // 2)}{'░' * (50 - int(progress_percent // 2))}]",
-            f"File {current_index}/{total_files} ({progress_percent:.1f}%)"
+            f"File {current_index}/{total_files} ({progress_percent:.1f}%)",
         )
         table.add_row("", f"Current: {current_file}")
 
@@ -149,7 +160,7 @@ class ProgressManager:
             "Checking amplitude modulation...",
             "Searching frequency domain patterns...",
             "Statistical anomaly detection...",
-            "Cross-correlation analysis..."
+            "Cross-correlation analysis...",
         ]
 
         with Progress(
@@ -157,7 +168,7 @@ class ProgressManager:
             TextColumn("[red]🔍 {task.description}"),
             BarColumn(),
             console=self.console,
-            transient=True
+            transient=True,
         ) as progress:
             for method in detection_methods:
                 task = progress.add_task(method, total=100)
@@ -171,7 +182,7 @@ class ProgressManager:
             SpinnerColumn(),
             TextColumn("[green]🧹 {task.description}"),
             console=self.console,
-            transient=True
+            transient=True,
         ) as progress:
             for method in methods_used:
                 task = progress.add_task(f"Applying {method}...", total=None)
@@ -186,14 +197,14 @@ class ProgressManager:
             "Statistical fingerprint verification...",
             "Quality metrics calculation...",
             "Hash comparison...",
-            "Final threat assessment..."
+            "Final threat assessment...",
         ]
 
         with Progress(
             SpinnerColumn(),
             TextColumn("[blue]🔬 {task.description}"),
             console=self.console,
-            transient=True
+            transient=True,
         ) as progress:
             for step in verification_steps:
                 task = progress.add_task(step, total=None)
@@ -206,49 +217,49 @@ class ProgressManager:
         size_change_percent = (size_diff / original_size) * 100
 
         # Create quality metrics table
-        table = Table(title="📊 Quality Check", show_header=True, header_style="bold blue")
+        table = Table(
+            title="📊 Quality Check", show_header=True, header_style="bold blue"
+        )
         table.add_column("Metric", style="cyan", width=20)
         table.add_column("Value", style="white", width=15)
         table.add_column("Status", style="white")
 
         # File size
-        status = "✅ Good" if size_change_percent < 5 else "⚠️ High" if size_change_percent < 20 else "❌ Poor"
-        table.add_row(
-            "Size Change",
-            f"{size_change_percent:.2f}%",
-            status
+        status = (
+            "✅ Good"
+            if size_change_percent < 5
+            else "⚠️ High" if size_change_percent < 20 else "❌ Poor"
         )
+        table.add_row("Size Change", f"{size_change_percent:.2f}%", status)
 
         # Simulated quality metrics
         snr = random.uniform(20, 60)
         snr_status = "✅ Excellent" if snr > 40 else "✅ Good" if snr > 25 else "⚠️ Fair"
-        table.add_row(
-            "Signal Quality",
-            f"{snr:.1f} dB",
-            snr_status
-        )
+        table.add_row("Signal Quality", f"{snr:.1f} dB", snr_status)
 
         spectral_similarity = random.uniform(0.85, 0.99)
-        spec_status = "✅ Excellent" if spectral_similarity > 0.95 else "✅ Good" if spectral_similarity > 0.90 else "⚠️ Fair"
-        table.add_row(
-            "Spectral Integrity",
-            f"{spectral_similarity:.1%}",
-            spec_status
+        spec_status = (
+            "✅ Excellent"
+            if spectral_similarity > 0.95
+            else "✅ Good" if spectral_similarity > 0.90 else "⚠️ Fair"
         )
+        table.add_row("Spectral Integrity", f"{spectral_similarity:.1%}", spec_status)
 
         preservation = random.uniform(0.80, 0.99)
-        pres_status = "✅ Excellent" if preservation > 0.95 else "✅ Good" if preservation > 0.85 else "⚠️ Fair"
-        table.add_row(
-            "Audio Preservation",
-            f"{preservation:.1%}",
-            pres_status
+        pres_status = (
+            "✅ Excellent"
+            if preservation > 0.95
+            else "✅ Good" if preservation > 0.85 else "⚠️ Fair"
         )
+        table.add_row("Audio Preservation", f"{preservation:.1%}", pres_status)
 
         self.console.print(table)
 
     def show_threat_meter(self, threats_found: int, total_possible: int):
         """Show visual threat meter"""
-        threat_level = (threats_found / total_possible) * 100 if total_possible > 0 else 0
+        threat_level = (
+            (threats_found / total_possible) * 100 if total_possible > 0 else 0
+        )
 
         # Choose color based on threat level
         if threat_level > 66:
@@ -267,7 +278,9 @@ class ProgressManager:
         meter = "█" * filled + "░" * (meter_width - filled)
 
         self.console.print(f"\n🚨 [bold]Threat Level: [{color}]{label}[/{color}]")
-        self.console.print(f"[{color}]{meter}[/{color}] {threats_found} threats detected ({threat_level:.0f}%)")
+        self.console.print(
+            f"[{color}]{meter}[/{color}] {threats_found} threats detected ({threat_level:.0f}%)"
+        )
 
     def show_progress_with_eta(self, current: int, total: int, start_time: float):
         """Show progress with estimated time remaining"""
@@ -289,18 +302,21 @@ class ProgressManager:
         self.console.print(
             f"\r[{current}/{total}] [{bar}] {progress_percent:.1f}% - ETA: {eta_str}",
             end="",
-            flush=True
+            flush=True,
         )
 
     def show_memory_usage(self, peak_memory: float = None):
         """Show memory usage information"""
         try:
             import psutil
+
             process = psutil.Process()
             memory_info = process.memory_info()
             current_memory = memory_info.rss / (1024 * 1024)  # MB
 
-            table = Table(title="💾 Memory Usage", show_header=True, header_style="bold blue")
+            table = Table(
+                title="💾 Memory Usage", show_header=True, header_style="bold blue"
+            )
             table.add_column("Type", style="cyan", width=15)
             table.add_column("Usage", style="white", width=15)
 
@@ -331,8 +347,12 @@ class ProgressManager:
             cpu_bars = int(cpu_percent // 5)
             bar = "█" * cpu_bars + "░" * (20 - cpu_bars)
 
-            color = "green" if cpu_percent < 50 else "yellow" if cpu_percent < 80 else "red"
-            self.console.print(f"💻 CPU Usage: [{color}]{bar}[/{color}] {cpu_percent:.1f}%")
+            color = (
+                "green" if cpu_percent < 50 else "yellow" if cpu_percent < 80 else "red"
+            )
+            self.console.print(
+                f"💻 CPU Usage: [{color}]{bar}[/{color}] {cpu_percent:.1f}%"
+            )
 
         except ImportError:
             self.console.print("CPU info unavailable (psutil not installed)")

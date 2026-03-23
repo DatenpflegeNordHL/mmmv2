@@ -15,9 +15,10 @@ import shutil
 from pydub import AudioSegment
 
 # Optimize for all CPU cores
-os.environ['OMP_NUM_THREADS'] = str(os.cpu_count())
-os.environ['MKL_NUM_THREADS'] = str(os.cpu_count())
-os.environ['NUMBA_NUM_THREADS'] = str(os.cpu_count())
+os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
+os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
+os.environ["NUMBA_NUM_THREADS"] = str(os.cpu_count())
+
 
 def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_count=0):
     """
@@ -27,9 +28,9 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
         Dict containing sanitization results
     """
     # Choose output format and path (keep extensions honest)
-    normalized_format = input_file.suffix.lstrip('.').lower()
+    normalized_format = input_file.suffix.lstrip(".").lower()
     if output_file:
-        normalized_format = output_file.suffix.lstrip('.').lower() or normalized_format
+        normalized_format = output_file.suffix.lstrip(".").lower() or normalized_format
         output_file = output_file.with_suffix(f".{normalized_format}")
     else:
         output_file = input_file.with_suffix(f".clean.{normalized_format}")
@@ -52,6 +53,7 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
     # Remove metadata using mutagen
     try:
         from mutagen import File as MutagenFile
+
         audio_file = MutagenFile(output_file)
         if audio_file is not None:
             audio_file.delete()
@@ -73,10 +75,7 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
         print(f"   ✅ Loaded {duration:.1f}s in {load_time:.2f}s")
     except Exception as e:
         print(f"   ❌ Failed to load audio: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        return {"success": False, "error": str(e)}
 
     # Phase 2: Apply minimal cleaning (avoid memory-intensive operations)
     print("🔥 Phase 2: Minimal audio cleaning...")
@@ -89,10 +88,11 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
 
     # Simple high-frequency filter to remove potential watermarks
     from scipy.signal import butter, filtfilt
+
     try:
         nyquist = sr / 2
         cutoff = min(20000, nyquist * 0.95)  # Cut off very high frequencies
-        b, a = butter(5, cutoff/nyquist, btype='low')
+        b, a = butter(5, cutoff / nyquist, btype="low")
         cleaned_audio = filtfilt(b, a, cleaned_audio)
         print("   ✅ Applied high-frequency filter")
     except Exception as e:
@@ -116,35 +116,38 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
 
         audio_int16 = np.clip(cleaned_audio * 32767, -32768, 32767).astype(np.int16)
 
-        if normalized_format == 'mp3':
+        if normalized_format == "mp3":
             segment = AudioSegment(
                 audio_int16.tobytes(),
                 frame_rate=sr,
                 sample_width=2,
-                channels=audio_int16.shape[1]
+                channels=audio_int16.shape[1],
             )
             segment.export(
                 str(output_file),
-                format='mp3',
-                bitrate='320k',
+                format="mp3",
+                bitrate="320k",
                 parameters=[
-                    '-map_metadata', '-1',
-                    '-write_xing', '0',
-                    '-id3v2_version', '0',
-                    '-write_id3v1', '0'
-                ]
+                    "-map_metadata",
+                    "-1",
+                    "-write_xing",
+                    "0",
+                    "-id3v2_version",
+                    "0",
+                    "-write_id3v1",
+                    "0",
+                ],
             )
         else:
-            sf.write(str(output_file), audio_int16, sr, format=normalized_format.upper())
+            sf.write(
+                str(output_file), audio_int16, sr, format=normalized_format.upper()
+            )
 
         save_time = time.time() - save_start
         print(f"   ✅ Saved in {save_time:.2f}s")
     except Exception as e:
         print(f"   ❌ Failed to save: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        return {"success": False, "error": str(e)}
 
     total_time = time.time() - start_time
 
@@ -152,17 +155,19 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
     # Split threats between metadata and watermarks proportionally
     if threat_count > 0:
         metadata_removed = max(1, threat_count // 3)  # Assume 1/3 are metadata threats
-        watermarks_removed = max(1, threat_count - metadata_removed)  # Rest are watermarks
+        watermarks_removed = max(
+            1, threat_count - metadata_removed
+        )  # Rest are watermarks
     else:
         metadata_removed = 1  # Always attempted
         watermarks_removed = 1  # Always attempted via filtering
 
     stats = {
-        'metadata_removed': metadata_removed,
-        'watermarks_removed': watermarks_removed,
-        'watermarks_detected': watermarks_removed,  # For verification compatibility
-        'processing_time': total_time,
-        'processing_speed': f"{duration/total_time:.1f}x real-time"
+        "metadata_removed": metadata_removed,
+        "watermarks_removed": watermarks_removed,
+        "watermarks_detected": watermarks_removed,  # For verification compatibility
+        "processing_time": total_time,
+        "processing_speed": f"{duration/total_time:.1f}x real-time",
     }
 
     print(f"\n🎉 FAST SANITIZATION COMPLETE!")
@@ -170,11 +175,8 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
     print(f"   Processing speed: {stats['processing_speed']}")
     print(f"   Output: {output_file}")
 
-    return {
-        'success': True,
-        'output_file': str(output_file),
-        'stats': stats
-    }
+    return {"success": True, "output_file": str(output_file), "stats": stats}
+
 
 def main():
     """Main function for testing"""
@@ -185,10 +187,11 @@ def main():
 
     result = fast_sanitize(input_file, paranoid_mode=False)
 
-    if result['success']:
+    if result["success"]:
         print("\n✨ Fast sanitization complete!")
     else:
         print(f"\n💥 Fast sanitization failed: {result.get('error', 'Unknown error')}")
+
 
 if __name__ == "__main__":
     main()

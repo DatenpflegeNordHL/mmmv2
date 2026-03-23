@@ -75,7 +75,6 @@ class BannerManager:
    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
    [cyan]Watermarks: ████░░░░░░░░░ 40% removed[/cyan]
             """,
-
             """
 🔍 [bold yellow]Scanning for Digital Fingerprints...[/bold yellow]
 
@@ -85,7 +84,6 @@ class BannerManager:
     ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
     [yellow]Metadata traces: ███████████ 100% found[/yellow]
             """,
-
             """
 💀 [bold red]Obliterating AI Watermarks...[/bold red]
 
@@ -93,7 +91,7 @@ class BannerManager:
    ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
    ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
    [red]Chaos level: ████████████ MAXIMUM[/red]
-            """
+            """,
         ]
 
         self.success_banners = [
@@ -110,7 +108,6 @@ class BannerManager:
     ║                                        ║
     ╚════════════════════════════════════════╝
             """,
-
             """
 🎉 [bold green]Audio Liberation Complete![/bold green]
 
@@ -120,37 +117,25 @@ class BannerManager:
     ∅ No watermarks remain embedded
     ∅ No AI fingerprints detectable
     ∅ Complete audio freedom achieved!
-            """
+            """,
         ]
 
     def show_main_banner(self):
         """Display the main application banner"""
-        panel = Panel.fit(
-            self.main_banner,
-            border_style="bold blue",
-            padding=(0, 0)
-        )
+        panel = Panel.fit(self.main_banner, border_style="bold blue", padding=(0, 0))
         self.console.print(panel)
         print()  # Add spacing
 
     def show_processing_banner(self):
         """Show a random processing banner"""
         banner = random.choice(self.processing_banners)
-        panel = Panel.fit(
-            banner,
-            border_style="yellow",
-            padding=(1, 2)
-        )
+        panel = Panel.fit(banner, border_style="yellow", padding=(1, 2))
         self.console.print(panel)
 
     def show_success_banner(self):
         """Show a random success banner"""
         banner = random.choice(self.success_banners)
-        panel = Panel.fit(
-            banner,
-            border_style="green",
-            padding=(1, 2)
-        )
+        panel = Panel.fit(banner, border_style="green", padding=(1, 2))
         self.console.print(panel)
 
     def show_version_info(self):
@@ -166,11 +151,7 @@ class BannerManager:
 🛡️  [bold red]LEGAL NOTICE:[/bold red] This tool is for authorized security research only.
 📚 Educational purposes only. Use responsibly and ethically.
         """
-        panel = Panel.fit(
-            version_info,
-            border_style="cyan",
-            padding=(1, 2)
-        )
+        panel = Panel.fit(version_info, border_style="cyan", padding=(1, 2))
         self.console.print(panel)
 
     def show_warning_banner(self, message: str):
@@ -183,11 +164,7 @@ Use only on files you own or have explicit permission to modify.
 
 You are responsible for compliance with all applicable laws.
         """
-        panel = Panel.fit(
-            warning_text,
-            border_style="red",
-            padding=(1, 2)
-        )
+        panel = Panel.fit(warning_text, border_style="red", padding=(1, 2))
         self.console.print(panel)
 
     def show_matrix_rain(self, duration: float = 2.0):
@@ -202,6 +179,7 @@ You are responsible for compliance with all applicable laws.
                     line += " "
             print(line)
             import time
+
             time.sleep(0.1)
 
     def show_dramatic_pause(self, message: str, duration: float = 1.5):
@@ -211,6 +189,7 @@ You are responsible for compliance with all applicable laws.
             dots += "."
             self.console.print(f"\r{message}{dots} ", end="")
             import time
+
             time.sleep(duration / 3)
         self.console.print()  # New line after completion
 
@@ -224,13 +203,16 @@ You are responsible for compliance with all applicable laws.
     def show_audio_visualization(self, duration: float = 1.0):
         """Show simple audio visualization"""
         import time
+
         bars = "▁▂▃▄▅▆▇█"
 
         for _ in range(int(duration * 10)):
             line = ""
             for _ in range(20):
                 height = random.choice(bars)
-                color = random.choice(["red", "green", "yellow", "blue", "magenta", "cyan"])
+                color = random.choice(
+                    ["red", "green", "yellow", "blue", "magenta", "cyan"]
+                )
                 line += f"[{color}]{height}[/{color}]"
             print(f"\r{line}", end="", flush=True)
             time.sleep(0.1)
@@ -249,11 +231,7 @@ You are responsible for compliance with all applicable laws.
 
     Stay safe, stay anonymous, and keep the music free! 🎼
         """
-        panel = Panel.fit(
-            easter_egg,
-            border_style="magenta",
-            padding=(1, 2)
-        )
+        panel = Panel.fit(easter_egg, border_style="magenta", padding=(1, 2))
         self.console.print(panel)
 
     def show_quote_banner(self, quote: str):
@@ -261,7 +239,7 @@ You are responsible for compliance with all applicable laws.
         quote_panel = Panel.fit(
             f"[italic magenta]💬 {quote}[/italic magenta]",
             border_style="magenta",
-            padding=(1, 2)
+            padding=(1, 2),
         )
         self.console.print(quote_panel)
 
@@ -277,9 +255,5 @@ Please check your input and try again.
 
 Remember: Not all audio can be saved from the matrix...
         """
-        panel = Panel.fit(
-            error_text,
-            border_style="red",
-            padding=(1, 2)
-        )
+        panel = Panel.fit(error_text, border_style="red", padding=(1, 2))
         self.console.print(panel)

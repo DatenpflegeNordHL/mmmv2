@@ -17,13 +17,15 @@ class FingerprintRemover:
     def __init__(self, paranoid_mode: bool = False):
         self.paranoid_mode = paranoid_mode
         self.human_audio_targets = {
-            'entropy_range': (6.0, 9.0),
-            'kurtosis_range': (1.5, 4.0),
-            'skewness_range': (-0.3, 0.3),
-            'temporal_variance': (0.01, 0.15)
+            "entropy_range": (6.0, 9.0),
+            "kurtosis_range": (1.5, 4.0),
+            "skewness_range": (-0.3, 0.3),
+            "temporal_variance": (0.01, 0.15),
         }
 
-    def remove_fingerprints(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def remove_fingerprints(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """
         Remove statistical AI fingerprints from audio
 
@@ -35,10 +37,10 @@ class FingerprintRemover:
             Dict containing fingerprint removal results
         """
         result = {
-            'cleaned_audio': audio_data.copy(),
-            'fingerprints_detected': [],
-            'removal_methods': [],
-            'quality_metrics': {}
+            "cleaned_audio": audio_data.copy(),
+            "fingerprints_detected": [],
+            "removal_methods": [],
+            "quality_metrics": {},
         }
 
         # Ensure stereo handling
@@ -53,54 +55,57 @@ class FingerprintRemover:
 
             # Method 1: Statistical normalization
             stats_result = self._normalize_statistics(cleaned_channel)
-            cleaned_channel = stats_result['cleaned_data']
-            if stats_result['fingerprints_detected']:
-                result['fingerprints_detected'].extend(stats_result['fingerprints_detected'])
-            result['removal_methods'].append('statistical_normalization')
+            cleaned_channel = stats_result["cleaned_data"]
+            if stats_result["fingerprints_detected"]:
+                result["fingerprints_detected"].extend(
+                    stats_result["fingerprints_detected"]
+                )
+            result["removal_methods"].append("statistical_normalization")
 
             # Method 2: Temporal randomization
             temporal_result = self._temporal_randomization(cleaned_channel, sample_rate)
-            cleaned_channel = temporal_result['cleaned_data']
-            result['removal_methods'].append('temporal_randomization')
+            cleaned_channel = temporal_result["cleaned_data"]
+            result["removal_methods"].append("temporal_randomization")
 
             # Method 3: Phase randomization
             if self.paranoid_mode:
                 phase_result = self._phase_randomization(cleaned_channel)
-                cleaned_channel = phase_result['cleaned_data']
-                result['removal_methods'].append('phase_randomization')
+                cleaned_channel = phase_result["cleaned_data"]
+                result["removal_methods"].append("phase_randomization")
 
             # Method 4: Micro-timing perturbation
-            timing_result = self._micro_timing_perturbation(cleaned_channel, sample_rate)
-            cleaned_channel = timing_result['cleaned_data']
-            result['removal_methods'].append('micro_timing_perturbation')
+            timing_result = self._micro_timing_perturbation(
+                cleaned_channel, sample_rate
+            )
+            cleaned_channel = timing_result["cleaned_data"]
+            result["removal_methods"].append("micro_timing_perturbation")
 
             # Method 5: Human-like imperfections
             if self.paranoid_mode:
-                imperfection_result = self._add_human_imperfections(cleaned_channel, sample_rate)
-                cleaned_channel = imperfection_result['cleaned_data']
-                result['removal_methods'].append('human_imperfections')
+                imperfection_result = self._add_human_imperfections(
+                    cleaned_channel, sample_rate
+                )
+                cleaned_channel = imperfection_result["cleaned_data"]
+                result["removal_methods"].append("human_imperfections")
 
             cleaned_channels.append(cleaned_channel)
 
         # Reconstruct multi-channel audio
         if len(cleaned_channels) == 1:
-            result['cleaned_audio'] = cleaned_channels[0]
+            result["cleaned_audio"] = cleaned_channels[0]
         else:
-            result['cleaned_audio'] = np.column_stack(cleaned_channels)
+            result["cleaned_audio"] = np.column_stack(cleaned_channels)
 
         # Calculate quality metrics
-        result['quality_metrics'] = self._calculate_quality_metrics(
-            audio_data, result['cleaned_audio']
+        result["quality_metrics"] = self._calculate_quality_metrics(
+            audio_data, result["cleaned_audio"]
         )
 
         return result
 
     def _normalize_statistics(self, audio_data: np.ndarray) -> Dict[str, Any]:
         """Normalize statistical characteristics to human-like levels"""
-        result = {
-            'cleaned_data': audio_data.copy(),
-            'fingerprints_detected': []
-        }
+        result = {"cleaned_data": audio_data.copy(), "fingerprints_detected": []}
 
         # Calculate current statistics
         current_skewness = self._calculate_skewness(audio_data)
@@ -110,30 +115,42 @@ class FingerprintRemover:
         # Detect statistical anomalies
         anomalies = []
 
-        if abs(current_skewness) > self.human_audio_targets['skewness_range'][1]:
-            anomalies.append({
-                'type': 'skewness_anomaly',
-                'value': current_skewness,
-                'target_range': self.human_audio_targets['skewness_range']
-            })
+        if abs(current_skewness) > self.human_audio_targets["skewness_range"][1]:
+            anomalies.append(
+                {
+                    "type": "skewness_anomaly",
+                    "value": current_skewness,
+                    "target_range": self.human_audio_targets["skewness_range"],
+                }
+            )
 
-        if not (self.human_audio_targets['kurtosis_range'][0] <= current_kurtosis <=
-                self.human_audio_targets['kurtosis_range'][1]):
-            anomalies.append({
-                'type': 'kurtosis_anomaly',
-                'value': current_kurtosis,
-                'target_range': self.human_audio_targets['kurtosis_range']
-            })
+        if not (
+            self.human_audio_targets["kurtosis_range"][0]
+            <= current_kurtosis
+            <= self.human_audio_targets["kurtosis_range"][1]
+        ):
+            anomalies.append(
+                {
+                    "type": "kurtosis_anomaly",
+                    "value": current_kurtosis,
+                    "target_range": self.human_audio_targets["kurtosis_range"],
+                }
+            )
 
-        if not (self.human_audio_targets['entropy_range'][0] <= current_entropy <=
-                self.human_audio_targets['entropy_range'][1]):
-            anomalies.append({
-                'type': 'entropy_anomaly',
-                'value': current_entropy,
-                'target_range': self.human_audio_targets['entropy_range']
-            })
+        if not (
+            self.human_audio_targets["entropy_range"][0]
+            <= current_entropy
+            <= self.human_audio_targets["entropy_range"][1]
+        ):
+            anomalies.append(
+                {
+                    "type": "entropy_anomaly",
+                    "value": current_entropy,
+                    "target_range": self.human_audio_targets["entropy_range"],
+                }
+            )
 
-        result['fingerprints_detected'] = anomalies
+        result["fingerprints_detected"] = anomalies
 
         if anomalies:
             # Apply statistical correction
@@ -147,15 +164,15 @@ class FingerprintRemover:
             statistical_noise = np.random.normal(0, noise_level, len(corrected_data))
             corrected_data += statistical_noise
 
-            result['cleaned_data'] = corrected_data
+            result["cleaned_data"] = corrected_data
 
         return result
 
-    def _temporal_randomization(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def _temporal_randomization(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """Apply subtle temporal randomization"""
-        result = {
-            'cleaned_data': audio_data.copy()
-        }
+        result = {"cleaned_data": audio_data.copy()}
 
         # Calculate micro-variations to add
         # Sample-level timing jitter (sub-sample precision)
@@ -171,16 +188,16 @@ class FingerprintRemover:
         jittered_indices = np.clip(jittered_indices, 0, len(audio_data) - 1)
 
         # Interpolate to apply jitter
-        f = interp1d(original_indices, audio_data, kind='cubic', bounds_error=False, fill_value=0)
-        result['cleaned_data'] = f(jittered_indices)
+        f = interp1d(
+            original_indices, audio_data, kind="cubic", bounds_error=False, fill_value=0
+        )
+        result["cleaned_data"] = f(jittered_indices)
 
         return result
 
     def _phase_randomization(self, audio_data: np.ndarray) -> Dict[str, Any]:
         """Apply phase randomization to disrupt watermarks"""
-        result = {
-            'cleaned_data': audio_data.copy()
-        }
+        result = {"cleaned_data": audio_data.copy()}
 
         # Compute FFT
         fft_data = np.fft.fft(audio_data)
@@ -193,19 +210,21 @@ class FingerprintRemover:
 
         # Reconstruct with modified phase
         modified_fft = magnitude * np.exp(1j * modified_phase)
-        result['cleaned_data'] = np.real(np.fft.ifft(modified_fft))
+        result["cleaned_data"] = np.real(np.fft.ifft(modified_fft))
 
         return result
 
-    def _micro_timing_perturbation(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def _micro_timing_perturbation(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """Apply micro-timing perturbations to break AI timing patterns"""
-        result = {
-            'cleaned_data': audio_data.copy()
-        }
+        result = {"cleaned_data": audio_data.copy()}
 
         # Identify transient points (onsets, attacks)
         # Use high-frequency content to find transients
-        high_freq = signal.sosfilt(signal.butter(4, 5000, 'hp', fs=sample_rate, output='sos'), audio_data)
+        high_freq = signal.sosfilt(
+            signal.butter(4, 5000, "hp", fs=sample_rate, output="sos"), audio_data
+        )
         envelope = np.abs(signal.hilbert(high_freq))
 
         # Find peaks in envelope (transients)
@@ -217,7 +236,9 @@ class FingerprintRemover:
         for peak in peaks:
             if 50 < peak < len(audio_data) - 50:  # Avoid edges
                 # Random small shift
-                shift_samples = np.random.randint(-shift_range_samples, shift_range_samples + 1)
+                shift_samples = np.random.randint(
+                    -shift_range_samples, shift_range_samples + 1
+                )
 
                 if shift_samples != 0:
                     # Apply local time stretching/compression
@@ -227,25 +248,27 @@ class FingerprintRemover:
 
                     # Create time indices with perturbation
                     original_indices = np.arange(window_size)
-                    perturbation = shift_samples * np.exp(-0.5 * ((np.arange(window_size) - window_size // 2) / 10) ** 2)
+                    perturbation = shift_samples * np.exp(
+                        -0.5 * ((np.arange(window_size) - window_size // 2) / 10) ** 2
+                    )
                     perturbed_indices = original_indices + perturbation
 
                     # Apply perturbation
                     window_data = audio_data[window_start:window_end]
                     f = signal.resample(window_data, len(perturbed_indices))
-                    result['cleaned_data'][window_start:window_start + len(f)] = f
+                    result["cleaned_data"][window_start : window_start + len(f)] = f
 
         return result
 
-    def _add_human_imperfections(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+    def _add_human_imperfections(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
         """Add subtle human-like imperfections"""
-        result = {
-            'cleaned_data': audio_data.copy()
-        }
+        result = {"cleaned_data": audio_data.copy()}
 
         # Micro-velocity variations (simulating human performance)
         velocity_variation = 1.0 + np.random.normal(0, 0.002, len(audio_data))
-        result['cleaned_data'] *= velocity_variation
+        result["cleaned_data"] *= velocity_variation
 
         # Subtle pitch drift (more human-like)
         drift_rate = np.random.normal(0, 0.0001, len(audio_data))
@@ -253,19 +276,23 @@ class FingerprintRemover:
         drift_modulation = np.exp(1j * phase_drift)
 
         # Apply pitch drift in frequency domain
-        fft_data = np.fft.fft(result['cleaned_data'])
+        fft_data = np.fft.fft(result["cleaned_data"])
         drifted_fft = fft_data * drift_modulation
-        result['cleaned_data'] = np.real(np.fft.ifft(drifted_fft))
+        result["cleaned_data"] = np.real(np.fft.ifft(drifted_fft))
 
         # Add very subtle harmonic distortion (characteristic of analog systems)
         distortion_level = 0.0001
-        second_harmonic = distortion_level * np.sign(result['cleaned_data']) * (result['cleaned_data'] ** 2)
-        result['cleaned_data'] += second_harmonic
+        second_harmonic = (
+            distortion_level
+            * np.sign(result["cleaned_data"])
+            * (result["cleaned_data"] ** 2)
+        )
+        result["cleaned_data"] += second_harmonic
 
         # Normalize to prevent clipping
-        max_val = np.max(np.abs(result['cleaned_data']))
+        max_val = np.max(np.abs(result["cleaned_data"]))
         if max_val > 0:
-            result['cleaned_data'] /= max_val
+            result["cleaned_data"] /= max_val
 
         return result
 
@@ -275,7 +302,7 @@ class FingerprintRemover:
 
         # Dynamic range compression to human-like levels
         # RMS-based normalization
-        rms = np.sqrt(np.mean(normalized_data ** 2))
+        rms = np.sqrt(np.mean(normalized_data**2))
 
         # Target RMS for human audio (typically around 0.1-0.2)
         target_rms = 0.15
@@ -308,19 +335,21 @@ class FingerprintRemover:
             return 0
         return np.mean(((data - mean) / std) ** 4)
 
-    def _calculate_quality_metrics(self, original: np.ndarray, cleaned: np.ndarray) -> Dict[str, Any]:
+    def _calculate_quality_metrics(
+        self, original: np.ndarray, cleaned: np.ndarray
+    ) -> Dict[str, Any]:
         """Calculate quality metrics comparing original and cleaned audio"""
         metrics = {}
 
         # Signal-to-Noise Ratio (SNR)
         noise = original - cleaned
-        signal_power = np.mean(original ** 2)
-        noise_power = np.mean(noise ** 2)
+        signal_power = np.mean(original**2)
+        noise_power = np.mean(noise**2)
 
         if noise_power > 0:
-            metrics['snr_db'] = 10 * np.log10(signal_power / noise_power)
+            metrics["snr_db"] = 10 * np.log10(signal_power / noise_power)
         else:
-            metrics['snr_db'] = float('inf')
+            metrics["snr_db"] = float("inf")
 
         # Perceptual similarity (simplified MFCC-based)
         if original.ndim == 1:
@@ -333,20 +362,20 @@ class FingerprintRemover:
 
         # Calculate distance between MFCCs
         mfcc_distance = np.mean(np.abs(orig_mfcc - clean_mfcc))
-        metrics['mfcc_distance'] = float(mfcc_distance)
+        metrics["mfcc_distance"] = float(mfcc_distance)
 
         # Spectral similarity
         orig_fft = np.abs(np.fft.fft(original.flatten()))
         clean_fft = np.abs(np.fft.fft(cleaned.flatten()))
         spectral_similarity = np.corrcoef(orig_fft, clean_fft)[0, 1]
-        metrics['spectral_similarity'] = float(spectral_similarity)
+        metrics["spectral_similarity"] = float(spectral_similarity)
 
         # Quality preservation score (0-1, higher is better)
-        if metrics['snr_db'] > 40:
+        if metrics["snr_db"] > 40:
             preservation_score = 1.0
-        elif metrics['snr_db'] > 20:
+        elif metrics["snr_db"] > 20:
             preservation_score = 0.8
-        elif metrics['snr_db'] > 10:
+        elif metrics["snr_db"] > 10:
             preservation_score = 0.6
         else:
             preservation_score = 0.4
@@ -354,7 +383,7 @@ class FingerprintRemover:
         # Adjust for spectral similarity
         preservation_score *= (1 + spectral_similarity) / 2
 
-        metrics['quality_preservation'] = float(preservation_score)
+        metrics["quality_preservation"] = float(preservation_score)
 
         return metrics
 
@@ -388,8 +417,9 @@ class FingerprintRemover:
                                 window_data = cleaned_data[start:end]
                                 shifted_data = np.interp(
                                     np.linspace(0, 1, len(window_data)),
-                                    np.linspace(0, 1, len(window_data)) + shift_samples / len(window_data),
-                                    window_data
+                                    np.linspace(0, 1, len(window_data))
+                                    + shift_samples / len(window_data),
+                                    window_data,
                                 )
                                 cleaned_data[start:end] = shifted_data
 
