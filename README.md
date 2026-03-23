@@ -1,6 +1,6 @@
 # 🎵 Melodic Metadata Massacrer (MMM)
 
-[![Python](https://img.shields.io/badge/Python-3.10-blue.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Experimental-orange.svg)]()
 
@@ -8,7 +8,9 @@
 
 <img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/6b342199-dbdd-446b-8c6f-983e50ef5625" />
 
-**MMM** is a Python CLI tool that performs lossless removal of ALL watermarks and metadata from MP3 and WAV audio files, effectively thwarting systems that detect AI-generated music through embedded identifiers.
+**MMM** is a Python CLI tool that strips metadata, disrupts watermark patterns, and applies spectral perturbation to MP3 and WAV audio files, making it harder for AI-detection systems to identify them as machine-generated.
+
+> **Note**: Sanitization re-encodes audio (MP3 at 320kbps, WAV at PCM_16) and applies subtle spectral modifications. This is not lossless — audio quality is preserved but not bit-identical.
 
 ## 🎭 Features
 
@@ -35,22 +37,20 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/research/mmm.git
+git clone https://github.com/geeknik/mmm.git
 cd mmm
 
-# Create virtual environment with Python 3.10-3.13 (librosa doesn't support 3.14+ yet)
-python3.10 -m venv mmm_env
+# Create virtual environment (Python 3.9+)
+python3 -m venv mmm_env
 source mmm_env/bin/activate  # On Windows: mmm_env\Scripts\activate
 
 # Install the package and all dependencies
 pip install -e .
 ```
 
-**Important**: MMM requires Python 3.10-3.13 due to librosa dependencies. Python 3.14+ is not yet supported by numba/librosa.
+### GPU Acceleration (Optional)
 
-### GPU Acceleration (Optional - Recommended!)
-
-For maximum performance (700x+ speedup), install GPU packages:
+For faster analysis on systems with NVIDIA GPUs:
 
 ```bash
 # Install GPU acceleration packages (NVIDIA GPU required)
@@ -61,37 +61,35 @@ python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
 ```
 
 **GPU Requirements:**
-- NVIDIA GPU with CUDA support (tested on RTX 3080 Ti)
+- NVIDIA GPU with CUDA support
 - 4GB+ VRAM recommended
 - CUDA 12.x compatible drivers
 
-### Performance Benchmarks
+### Performance
 
-With GPU acceleration enabled (RTX 3080 Ti):
+Processing speed depends on hardware, file length, and mode:
 
-- **790x real-time processing speed**
-- **47,409 audio-minutes per minute throughput**
-- **0.27 seconds to analyze 214.6-second audio file**
-- **Parallel processing across all CPU cores + GPU**
-
-Without GPU acceleration (CPU-only):
-- Standard processing speed (slower for large files)
-- Still utilizes multi-core CPU processing
+| Mode | 3.5 min MP3 (4.9 MB) | Notes |
+|------|----------------------|-------|
+| Turbo (CPU) | ~70s | 3x real-time, `--turbo` flag |
+| Turbo + Paranoid (CPU) | ~99s | 2.2x real-time, all stealth flags |
+| Turbo (GPU) | Significantly faster | Requires NVIDIA GPU + CUDA |
+| Regular (no turbo) | Very slow | Runs 6 O(N) watermark detection methods; not recommended for files > 1 min |
 
 ### Basic Usage
 
 ```bash
-# Obliterate metadata from a single file
-mmm obliterate dystopian_symphony.mp3
+# Sanitize a single file (recommended: turbo + paranoid)
+mmm obliterate music.mp3 --turbo --paranoid -o clean_music.mp3
 
-# Paranoid mode with verification
-mmm obliterate suspicious_music.wav --paranoid --verify -o clean_output.wav
+# Quick sanitize without paranoid
+mmm obliterate music.mp3 --turbo -o clean_music.mp3
 
 # Batch process directory
 mmm massacre /path/to/music --paranoid --workers 8
 
 # Analyze file without modifying
-mmm analyze questionable_track.mp3
+mmm analyze music.mp3 --turbo
 ```
 
 ## 🔧 Configuration
@@ -106,13 +104,14 @@ watermark_detection:
   - spread_spectrum
   - echo_based
   - statistical
-output_format: preserve_original
+output_format: preserve
 backup_originals: true
 ```
 
 ### Presets
 
 - **`stealth`**: Maximum paranoia, quality preservation
+- **`stealth-plus`**: Stealth with advanced flags optimized for detector evasion
 - **`fast`**: Quick processing, basic cleaning
 - **`quality`**: Preserve maximum audio quality
 - **`research`**: Deep analysis, detailed logging
@@ -139,7 +138,7 @@ Options:
   --verify             Verify watermark removal
   --backup             Create backup of original
   --format FORMAT      Output format (preserve/mp3/wav)
-  --turbo              Enable GPU acceleration (700x+ faster)
+  --turbo              Enable turbo mode (faster, uses preserving sanitizer)
 ```
 
 ### `massacre`
@@ -157,11 +156,11 @@ Options:
 ```
 
 ### `analyze`
-Deep forensic analysis without modification
+Forensic analysis without modification
 
 ```bash
-mmm analyze INPUT_FILE                # Regular CPU mode
-mmm analyze INPUT_FILE --turbo        # GPU accelerated mode (700x+ faster)
+mmm analyze INPUT_FILE                # Regular mode (slow on long files)
+mmm analyze INPUT_FILE --turbo        # Turbo mode (faster)
 ```
 
 ### `config`
@@ -170,6 +169,10 @@ Configuration management
 ```bash
 mmm config              Show current config
 mmm config preset NAME  Apply preset
+mmm config list         List available presets
+mmm config create NAME  Create custom preset
+mmm config delete NAME  Delete custom preset
+mmm config reset        Reset to defaults
 ```
 
 ## 🎛️ Advanced Stealth Flags
@@ -186,25 +189,21 @@ These are opt-in, fine-grained toggles for research tuning. Defaults keep audio 
 - `--refined-transient/--no-refined-transient` (default off): ultra-small, onset-gated shifts.
 - `--adaptive-transient/--no-adaptive-transient` (default off): onset-strength adaptive micro-shifts (~0.03–0.08 ms) with light blending.
 
-Recommended “stealth” starting point (quality-preserving):
+### Maximum stealth (all flags enabled)
+
 ```bash
-python -m mmm.cli obliterate input.mp3 -o output.mp3 --turbo --paranoid \
-  --gated-resample-nudge --phase-noise \
-  --no-phase-dither --no-comb-mask --no-transient-shift \
-  --no-phase-swirl --no-masked-hf-phase --no-resample-nudge \
-  --no-hf-decorrelate --no-micro-eq-flutter --no-refined-transient
+mmm obliterate input.mp3 -o output.mp3 --turbo --paranoid \
+  --masked-hf-phase --gated-resample-nudge --micro-eq-flutter \
+  --hf-decorrelate --adaptive-transient
 ```
 
-Preset shortcut (applies the above flags): `stealth-plus`
+### Preset shortcut
 
-```yaml
-# ~/.config/mmm/config.yaml (example)
-preset: stealth-plus
+```bash
+mmm config preset stealth-plus
 ```
 
-You can also load it via `mmm config preset stealth-plus` (creates/uses preset file under your config dir).
-
-Preset includes advanced flags:
+Preset `stealth-plus` includes advanced flags:
 - phase_dither=False, comb_mask=False, transient_shift=False
 - phase_swirl=False, masked_hf_phase=False, resample_nudge=False
 - gated_resample_nudge=True, phase_noise=True
@@ -212,15 +211,23 @@ Preset includes advanced flags:
 - refined_transient=False, adaptive_transient=False
 
 Notes on pattern suppression counts:
-- “Patterns Found/Suppressed” in sanitization results come from the spectral cleaner’s suppression actions (e.g., attenuating suspicious bands/patterns) and do not imply detector-verified watermarks unless the detector reports them.
+- "Patterns Found/Suppressed" in sanitization results come from the spectral cleaner's suppression actions (e.g., attenuating suspicious bands/patterns) and do not imply detector-verified watermarks unless the detector reports them.
 - Verification threat counts include metadata/container anomalies and detector findings; if the detector reports zero watermarks, remaining threats are likely metadata/binary anomalies rather than confirmed watermarks.
 
 ## 🧪 Detector Notes (Research)
 
-We test against third-party detectors to understand robustness (not to guarantee evasion). Recent results:
+We test against third-party detectors to understand robustness (not to guarantee evasion). Results on a Suno-generated 3.5 min MP3 (March 2026):
 
-- **SubmitHub / SHLabs**: “Inconclusive / mixed characteristics” with clean audio using `--gated-resample-nudge --phase-noise` and other advanced flags off. Temporal scores improved significantly; spectral scores became “could be AI / human unlikely”.
-- Aggressive stacks (phase dither / comb mask / transient shift) degraded audio; not recommended.
+**SubmitHub / SHLabs results:**
+
+| Mode | Verdict | Spectral: Human | Spectral: Pure AI | Temporal: Human | Temporal: Pure AI |
+|------|---------|-----------------|-------------------|-----------------|-------------------|
+| Turbo (default flags) | Possible AI Detected | 15% | 36% | 44% | 6% |
+| Turbo + Paranoid + All Flags | **Inconclusive** | **43%** | **15%** | **65% (likely)** | **1% (highly unlikely)** |
+
+- Paranoid mode with all stealth flags shifted the verdict from "Possible AI Detected" to "Inconclusive"
+- Temporal: Pure AI dropped to 1% ("highly unlikely")
+- Aggressive stacks (phase dither / comb mask / transient shift) degraded audio; not recommended
 
 Always audition audio locally before running external checks.
 
@@ -246,6 +253,7 @@ Always audition audio locally before running external checks.
 ┌─────────────────▼───────────────────────┐
 │            Core Processing              │
 │  • AudioSanitizer main engine          │
+│  • PreservingSanitizer (turbo mode)    │
 │  • FileProcessor for batch operations   │
 └─────────────────┬───────────────────────┘
                   │
@@ -267,18 +275,10 @@ Always audition audio locally before running external checks.
 ### Dependencies
 
 - **Core**: Click, NumPy, SciPy
-- **Audio**: Librosa, PyDub, SoundFile
+- **Audio**: Librosa, PyDub, SoundFile, Resampy
 - **Metadata**: Mutagen
 - **UI**: Rich, Colorama
-
-### Quality Preservation
-
-MMM prioritizes audio quality while removing watermarks:
-
-- **Signal-to-Noise Ratio**: >40dB target
-- **Quality Loss**: <5% maximum
-- **Spectral Integrity**: >90% preservation
-- **Dynamic Range**: Preserved when possible
+- **GPU (optional)**: CuPy, PyTorch
 
 ## 🧪 Development
 
@@ -286,14 +286,16 @@ MMM prioritizes audio quality while removing watermarks:
 
 ```bash
 # Install test dependencies
-pip install pytest pytest-cov
+pip install pytest
 
-# Run tests
-pytest tests/ -v --cov=mmm
+# Run tests (note: some tests are skipped due to high memory usage)
+pytest tests/ -v
 
-# Run specific test
+# Run specific test file
 pytest tests/test_audio_sanitizer.py -v
 ```
+
+> **Warning**: The full test suite can consume significant RAM due to audio processing operations. Run individual test files rather than the full suite on memory-constrained systems.
 
 ### Contributing
 
@@ -319,16 +321,6 @@ flake8 mmm/
 mypy mmm/
 ```
 
-## 📈 Performance Metrics
-
-| Operation | File Size | Processing Time | Quality Loss |
-|-----------|-----------|----------------|--------------|
-| MP3 (5 min) | 5MB | ~15s | <2% |
-| WAV (5 min) | 50MB | ~30s | <1% |
-| Paranoid Mode | Variable | 2-3x slower | Same |
-
-*Results on Intel i7-9700K, 16GB RAM*
-
 ## 🔬 Research Applications
 
 MMM is designed for academic and security research:
@@ -349,9 +341,8 @@ MMM features a unique hacker-aesthetic interface:
 └─────────────────────────────────────────────┘
 
 🔍 Scanning: dystopian_symphony.mp3
-😈 Found 47 metadata tags... time to DELETE THEM ALL!
-🌊 Spectral watermark detected at 19.2kHz... NEUTRALIZING...
-⚡ Statistical fingerprint obliterated!
+😈 Found 1 threats... time to DELETE THEM ALL!
+🌊 Beginning audio sanitization protocol...
 ✨ File sanitized! Your AI overlords will never know... 🤫
 ```
 
@@ -364,10 +355,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Open-source audio processing community
 - Security researchers in digital watermarking
 - Python audio processing ecosystem
-
-## ⚡ Disclaimer
-
-*"The best place to hide a dead body is page two of the search results. But your metadata won't even make it there."*
 
 ---
 

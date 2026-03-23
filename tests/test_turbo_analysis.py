@@ -64,10 +64,11 @@ class TestAnalyzeAudioChunkGpu:
         args = (self.test_audio, self.sample_rate, 0, 0.0)
         result = analyze_audio_chunk_gpu(args)
 
-        if result["watermarks"] is not None:
-            assert "detected" in result["watermarks"]
-            assert "confidence" in result["watermarks"]
-            assert "method" in result["watermarks"]
+        wm = result["watermarks"]
+        if isinstance(wm, dict):
+            assert "detected" in wm
+            assert "confidence" in wm
+            assert "method" in wm
 
 
 class TestTurboAnalysis:

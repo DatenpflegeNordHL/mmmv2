@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines
 """
 PRESERVING Sanitizer - Removes threats while keeping audio playable
 """

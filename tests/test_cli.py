@@ -117,6 +117,31 @@ class TestCLI:
         assert 'delete' in result.output
         assert 'reset' in result.output
 
+class TestCLICommands:
+    """Test cases for CLI audio processing commands"""
+
+    def setup_method(self):
+        """Set up test fixtures"""
+        self.runner = CliRunner()
+        self.test_dir = Path(tempfile.mkdtemp())
+
+        self.sample_rate = 44100
+        self.duration = 1.0
+        t = np.linspace(0, self.duration, int(self.sample_rate * self.duration))
+        self.test_audio = 0.5 * np.sin(2 * np.pi * 440 * t)
+
+    def teardown_method(self):
+        """Clean up test fixtures"""
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def create_test_audio_file(self, filename: str, audio_data: np.ndarray = None) -> Path:
+        """Create a test audio file"""
+        if audio_data is None:
+            audio_data = self.test_audio
+        file_path = self.test_dir / filename
+        sf.write(str(file_path), audio_data, self.sample_rate)
+        return file_path
+
     def test_analyze_command(self):
         """Test analyze command"""
         input_file = self.create_test_audio_file("test_analyze.wav")
