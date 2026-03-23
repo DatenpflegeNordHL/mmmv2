@@ -20,6 +20,7 @@ setup(
         "colorama>=0.4.6",
         "rich>=13.0.0",
         "PyYAML>=6.0",
+        "flask>=3.0,<4.0",
     ],
     entry_points={
         "console_scripts": [

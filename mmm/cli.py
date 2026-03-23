@@ -793,6 +793,48 @@ def config_reset():
 
 
 @cli.command()
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    show_default=True,
+    help="Host to bind to (use 0.0.0.0 for all interfaces)",
+)
+@click.option(
+    "--port",
+    default=8778,
+    show_default=True,
+    type=int,
+    help="Port to listen on",
+)
+@click.option(
+    "--max-size",
+    default=500,
+    show_default=True,
+    type=int,
+    help="Maximum upload file size in MB",
+)
+def server(host, port, max_size):
+    """
+    🌐 Launch browser-based audio sanitizer
+
+    Starts a local web server with drag-and-drop audio sanitization.
+    Open the displayed URL in your browser to use the web interface.
+
+    Examples:
+
+        mmm server
+
+        mmm server --port 9000
+
+        mmm server --host 0.0.0.0 --port 8778
+    """
+    from .server import run_server
+
+    max_file_size = max_size * 1024 * 1024
+    run_server(host=host, port=port, max_file_size=max_file_size)
+
+
+@cli.command()
 def version():
     """
     📋 Show version and build information
