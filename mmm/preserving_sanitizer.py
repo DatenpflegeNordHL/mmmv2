@@ -457,10 +457,10 @@ def _apply_resample_nudge(
     for ch in range(audio.shape[1]):
         # High-quality resample to nudged rate then back
         up = librosa.resample(
-            audio[:, ch], orig_sr=sr, target_sr=sr * factor, res_type="kaiser_best"
+            audio[:, ch], orig_sr=sr, target_sr=sr * factor, res_type="soxr_hq"
         )
         back = librosa.resample(
-            up, orig_sr=sr * factor, target_sr=sr, res_type="kaiser_best"
+            up, orig_sr=sr * factor, target_sr=sr, res_type="soxr_hq"
         )
         # Match original length
         if len(back) < target_len:
@@ -500,10 +500,10 @@ def _apply_rms_gated_resample_nudge(
             # alternate factors to avoid bias
             factor = factor_high if (start // hop) % 2 == 0 else factor_low
             up = librosa.resample(
-                seg, orig_sr=sr, target_sr=sr * factor, res_type="kaiser_fast"
+                seg, orig_sr=sr, target_sr=sr * factor, res_type="soxr_hq"
             )
             back = librosa.resample(
-                up, orig_sr=sr * factor, target_sr=sr, res_type="kaiser_fast"
+                up, orig_sr=sr * factor, target_sr=sr, res_type="soxr_hq"
             )
             if len(back) < end - start:
                 back = np.pad(back, (0, end - start - len(back)), mode="edge")
