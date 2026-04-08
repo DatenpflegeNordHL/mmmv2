@@ -65,7 +65,8 @@ class TestAnalyzeAudioChunkGpu:
         result = analyze_audio_chunk_gpu(args)
 
         wm = result["watermarks"]
-        if isinstance(wm, dict):
+        if wm is not None:
+            assert isinstance(wm, dict)
             assert "detected" in wm
             assert "confidence" in wm
             assert "method" in wm
