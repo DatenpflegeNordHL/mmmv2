@@ -450,34 +450,25 @@ def create_app(
     @app.route("/api/download/<token>")
     def api_download(token: str) -> tuple:
         registry: dict = app.config["DOWNLOAD_REGISTRY"]
-        entry = registry.get(token)
+        entry = registry.pop(token, None)  # Atomic remove from registry
 
         if entry is None:
             return jsonify({"error": "File not found or expired."}), 404
 
         file_path = Path(entry["path"])
         if not file_path.exists():
-            registry.pop(token, None)
             return jsonify({"error": "File not found or expired."}), 404
 
         filename = entry["filename"]
 
-        # Schedule cleanup after download
-        @app.after_request
-        def _cleanup(response: Response) -> Response:
-            # Remove from registry and disk after sending
-            registry.pop(token, None)
-            try:
-                file_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            return response
-
-        return send_file(
+        response = send_file(
             str(file_path),
             as_attachment=True,
             download_name=filename,
         )
+        # Clean up file after response is sent to client
+        response.call_on_close(lambda: file_path.unlink(missing_ok=True))
+        return response
 
     @app.errorhandler(413)
     def _too_large(e):

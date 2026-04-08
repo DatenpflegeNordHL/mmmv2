@@ -98,7 +98,7 @@ class FingerprintRemover:
 
         # Calculate quality metrics
         result["quality_metrics"] = self._calculate_quality_metrics(
-            audio_data, result["cleaned_audio"]
+            audio_data, result["cleaned_audio"], sample_rate
         )
 
         return result
@@ -289,9 +289,9 @@ class FingerprintRemover:
         )
         result["cleaned_data"] += second_harmonic
 
-        # Normalize to prevent clipping
+        # Only normalize if actual clipping occurred
         max_val = np.max(np.abs(result["cleaned_data"]))
-        if max_val > 0:
+        if max_val > 1.0:
             result["cleaned_data"] /= max_val
 
         return result
@@ -314,8 +314,8 @@ class FingerprintRemover:
         clipped_indices = np.abs(normalized_data) > clipping_threshold
 
         if np.any(clipped_indices):
-            # Apply soft clipping curve
-            normalized_data = np.tanh(normalized_data * 2) / 2
+            # Apply soft clipping only to the samples that exceed threshold
+            normalized_data[clipped_indices] = np.tanh(normalized_data[clipped_indices] * 2) / 2
 
         return normalized_data
 
@@ -336,7 +336,7 @@ class FingerprintRemover:
         return np.mean(((data - mean) / std) ** 4)
 
     def _calculate_quality_metrics(
-        self, original: np.ndarray, cleaned: np.ndarray
+        self, original: np.ndarray, cleaned: np.ndarray, sample_rate: int = 44100
     ) -> Dict[str, Any]:
         """Calculate quality metrics comparing original and cleaned audio"""
         metrics = {}
@@ -353,15 +353,16 @@ class FingerprintRemover:
 
         # Perceptual similarity (simplified MFCC-based)
         if original.ndim == 1:
-            orig_mfcc = librosa.feature.mfcc(y=original, sr=22050, n_mfcc=13)
-            clean_mfcc = librosa.feature.mfcc(y=cleaned, sr=22050, n_mfcc=13)
+            orig_mfcc = librosa.feature.mfcc(y=original, sr=sample_rate, n_mfcc=13)
+            clean_mfcc = librosa.feature.mfcc(y=cleaned, sr=sample_rate, n_mfcc=13)
         else:
             # Use first channel for MFCC comparison
-            orig_mfcc = librosa.feature.mfcc(y=original[:, 0], sr=22050, n_mfcc=13)
-            clean_mfcc = librosa.feature.mfcc(y=cleaned[:, 0], sr=22050, n_mfcc=13)
+            orig_mfcc = librosa.feature.mfcc(y=original[:, 0], sr=sample_rate, n_mfcc=13)
+            clean_mfcc = librosa.feature.mfcc(y=cleaned[:, 0], sr=sample_rate, n_mfcc=13)
 
-        # Calculate distance between MFCCs
-        mfcc_distance = np.mean(np.abs(orig_mfcc - clean_mfcc))
+        # Calculate distance between MFCCs (handle length mismatch)
+        min_frames = min(orig_mfcc.shape[1], clean_mfcc.shape[1])
+        mfcc_distance = np.mean(np.abs(orig_mfcc[:, :min_frames] - clean_mfcc[:, :min_frames]))
         metrics["mfcc_distance"] = float(mfcc_distance)
 
         # Spectral similarity
@@ -387,15 +388,15 @@ class FingerprintRemover:
 
         return metrics
 
-    def remove_machine_perfection_patterns(self, audio_data: np.ndarray) -> np.ndarray:
+    def remove_machine_perfection_patterns(self, audio_data: np.ndarray, sample_rate: int = 44100) -> np.ndarray:
         """Remove patterns typical of machine-perfect audio generation"""
         cleaned_data = audio_data.copy()
 
         # Detect and disrupt perfect rhythmic patterns
         # Compute onset detection
-        onset_frames = librosa.onset.onset_detect(y=cleaned_data, sr=22050)
+        onset_frames = librosa.onset.onset_detect(y=cleaned_data, sr=sample_rate)
         if len(onset_frames) > 3:
-            onset_times = librosa.frames_to_time(onset_frames, sr=22050)
+            onset_times = librosa.frames_to_time(onset_frames, sr=sample_rate)
             intervals = np.diff(onset_times)
 
             # Check for too-perfect timing

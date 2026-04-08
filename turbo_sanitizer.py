@@ -3,9 +3,6 @@
 Turbo Sanitizer - GPU-accelerated audio sanitization
 """
 
-import sys
-sys.path.insert(0, '/home/geeknik/dev/mmm')
-
 import os
 import librosa
 import numpy as np
@@ -32,6 +29,7 @@ def turbo_sanitize(input_file, output_file=None, paranoid_mode=False):
     Returns:
         Dict containing sanitization results
     """
+    overall_start = time.time()
     # Decide output format and output path before logging
     normalized_format = input_file.suffix.lstrip('.').lower()
     if output_file:
@@ -174,7 +172,7 @@ def turbo_sanitize(input_file, output_file=None, paranoid_mode=False):
         sf.write(str(output_file), audio_int16, sr, format=normalized_format.upper())
 
     save_time = time.time() - start_time
-    total_time = time.time() - (load_time + metadata_time + spectral_time + fingerprint_time + save_time)
+    total_time = time.time() - overall_start
 
     print(f"   ✅ Saved in {save_time:.2f}s")
 
@@ -184,7 +182,7 @@ def turbo_sanitize(input_file, output_file=None, paranoid_mode=False):
         'watermarks_removed': total_watermarks,
         'fingerprint_operations': fingerprint_result.get('operations', 0),
         'total_time': total_time,
-        'processing_speed': f"{(len(audio)/sr)/total_time:.1f}x real-time"
+        'processing_speed': f"{(len(audio)/sr)/max(total_time, 1e-9):.1f}x real-time"
     }
 
     print(f"\n🎉 TURBO SANITIZATION COMPLETE!")

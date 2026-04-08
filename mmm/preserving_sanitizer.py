@@ -204,8 +204,11 @@ def preserving_sanitize(
         sanitized_audio = sanitized_audio * (original_rms / new_rms)
         print(f"   ✅ Restored RMS level: {np.sqrt(np.mean(sanitized_audio ** 2)):.6f}")
 
-    # 5. Gentle limiting to prevent clipping
+    # 5. Gentle limiting to prevent clipping, then restore RMS
     sanitized_audio = np.tanh(sanitized_audio * 0.95)  # Soft limiting
+    post_tanh_rms = np.sqrt(np.mean(sanitized_audio**2))
+    if post_tanh_rms > 0:
+        sanitized_audio = sanitized_audio * (original_rms / post_tanh_rms)
 
     # 6. Final quality check
     final_rms = np.sqrt(np.mean(sanitized_audio**2))
@@ -392,8 +395,8 @@ def _apply_humanization(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
         lfo = depth_samples * np.sin(
             2 * np.pi * rate_hz * t + np.random.uniform(0, 2 * np.pi)
         )
-        indices = np.clip(np.arange(n) + lfo, 0, n - 1)
-        audio[:, ch] = np.interp(np.arange(n), indices, audio[:, ch])
+        shifted_positions = np.clip(np.arange(n) - lfo, 0, n - 1)
+        audio[:, ch] = np.interp(shifted_positions, np.arange(n), audio[:, ch])
 
     # Micro gain swings (simulate human dynamics)
     env_noise = np.random.normal(0, 1, n)
@@ -782,9 +785,9 @@ def _apply_subblock_phase_dither(
     n, channels = audio.shape
     output = np.zeros_like(audio)
     window = np.hanning(block)
-    accum = np.zeros(n)
 
     for ch in range(channels):
+        accum = np.zeros(n)  # Reset accumulator per channel
         idx = 0
         while idx < n:
             end = min(idx + block, n)

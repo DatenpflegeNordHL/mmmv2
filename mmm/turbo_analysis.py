@@ -3,10 +3,6 @@
 Turbo Analysis - GPU + Multi-core CPU optimization
 """
 
-import sys
-
-sys.path.insert(0, "/home/geeknik/dev/mmm")
-
 import os
 import librosa
 import numpy as np

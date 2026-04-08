@@ -239,7 +239,7 @@ class SpectralCleaner:
         nperseg = min(2048, len(audio_data) // 8)
         if nperseg < 256:
             nperseg = 256
-        stft = librosa.stft(audio_data, nperseg=nperseg)
+        stft = librosa.stft(audio_data, n_fft=nperseg)
         magnitude = np.abs(stft)
         phase = np.angle(stft)
 
@@ -296,17 +296,15 @@ class SpectralCleaner:
         anomaly_threshold = np.std(residuals) * 2
         anomalies = np.abs(residuals) > anomaly_threshold
 
-        # Add adaptive noise to mask anomalies
+        # Add adaptive noise to mask anomalies in frequency domain
         noise_level = 1e-6
-        adaptive_noise = np.random.normal(0, noise_level, len(audio_data))
+        noise_fft = np.random.normal(0, noise_level, len(fft_data)) + 1j * np.random.normal(0, noise_level, len(fft_data))
 
         # Increase noise at anomaly frequencies
         anomaly_freq_indices = np.where(anomalies)[0]
         if len(anomaly_freq_indices) > 0:
-            adaptive_noise[anomaly_freq_indices] *= 3
+            noise_fft[anomaly_freq_indices] *= 3
 
-        # Apply noise in frequency domain
-        noise_fft = fft(adaptive_noise)
         modified_fft = fft_data + noise_fft
 
         # Convert back to time domain
@@ -395,6 +393,7 @@ class SpectralCleaner:
     ) -> np.ndarray:
         """Advanced spread spectrum watermark removal"""
         cleaned_data = audio_data.copy()
+        original_length = len(cleaned_data)
 
         # Multiple window sizes for comprehensive analysis
         window_sizes = [512, 1024, 2048, 4096]
@@ -419,7 +418,8 @@ class SpectralCleaner:
                     attenuation = 0.2
                     Zxx[peak_idx, time_idx] *= attenuation
 
-            # Reconstruct signal
+            # Reconstruct signal and preserve original length
             _, cleaned_data = signal.istft(Zxx, fs=sample_rate, nperseg=window_size)
+            cleaned_data = cleaned_data[:original_length]
 
         return cleaned_data

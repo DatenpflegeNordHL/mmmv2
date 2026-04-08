@@ -280,10 +280,23 @@ class FileProcessor:
         ext = input_file.suffix
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
-        # Apply naming pattern
-        output_name = naming_pattern.format(name=name, ext=ext, timestamp=timestamp)
+        # Apply naming pattern using safe string.Template (prevents attribute access)
+        from string import Template
 
-        return output_dir / output_name
+        safe_pattern = naming_pattern.replace("{", "${")
+        try:
+            output_name = Template(safe_pattern).safe_substitute(
+                name=name, ext=ext, timestamp=timestamp
+            )
+        except (KeyError, ValueError):
+            output_name = f"{name}_clean{ext}"
+
+        # Prevent path traversal
+        output_path = (output_dir / output_name).resolve()
+        if not str(output_path).startswith(str(output_dir.resolve())):
+            raise ValueError("Output naming pattern produces path outside output directory")
+
+        return output_path
 
     def _display_summary(self, results: Dict[str, Any]):
         """Display processing summary"""

@@ -428,6 +428,7 @@ class MetadataScanner:
                 f.seek(12)
 
                 chunk_positions = []
+                file_size = file_path.stat().st_size
                 while True:
                     # Read chunk header
                     chunk_header = f.read(8)
@@ -436,6 +437,10 @@ class MetadataScanner:
 
                     chunk_id = chunk_header[:4]
                     chunk_size = struct.unpack("<I", chunk_header[4:8])[0]
+
+                    # Prevent infinite loop on zero-size chunks
+                    if chunk_size == 0 and chunk_id != b"data":
+                        break
 
                     # Store chunk info
                     chunk_info = {
@@ -446,6 +451,10 @@ class MetadataScanner:
                     results["chunks"].append(chunk_info)
                     chunk_positions.append(f.tell() - 8)
 
+                    # Safety: don't seek past EOF
+                    if f.tell() + chunk_size > file_size:
+                        break
+
                     # Skip chunk data
                     f.seek(chunk_size, 1)
                     # Skip padding byte if chunk size is odd
@@ -453,7 +462,7 @@ class MetadataScanner:
                         f.seek(1, 1)
 
                     # Safety check
-                    if f.tell() > file_path.stat().st_size:
+                    if f.tell() >= file_size:
                         break
 
                 # Flag truly unusual chunks.  The WAV spec defines many

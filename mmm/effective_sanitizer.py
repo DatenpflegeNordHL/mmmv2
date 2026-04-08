@@ -106,26 +106,32 @@ def aggressive_sanitize(
         low_norm = low_freq / nyquist
         high_norm = high_freq / nyquist
 
+        # First band starts at 0, use lowpass instead of bandpass
+        if i == 0:
+            low_norm = None
         if (
-            low_norm > 0
-            and low_norm < 1.0
+            (low_norm is None or (low_norm > 0 and low_norm < 1.0))
             and high_norm > 0
             and high_norm < 1.0
-            and high_norm > low_norm
+            and (low_norm is None or high_norm > low_norm)
         ):
-            b, a = butter(4, [low_norm, high_norm], btype="band")
+            if low_norm is None:
+                b, a = butter(4, high_norm, btype="low")
+            else:
+                b, a = butter(4, [low_norm, high_norm], btype="band")
             try:
                 band_signal = filtfilt(b, a, sanitized_audio)
 
                 # Distort the band
                 distortion_factor = 0.3 if paranoid_mode else 0.1
-                band_signal = band_signal + distortion_factor * np.random.normal(
+                original_band = band_signal.copy()
+                distorted_band = band_signal + distortion_factor * np.random.normal(
                     0, np.std(band_signal), len(band_signal)
                 )
 
-                # Add back
-                sanitized_audio = sanitized_audio - band_signal + band_signal
-            except:
+                # Replace original band with distorted version
+                sanitized_audio = sanitized_audio - original_band + distorted_band
+            except Exception:
                 pass  # Skip if filter fails
 
     # 3. Temporal disruption to break patterns
@@ -186,26 +192,29 @@ def aggressive_sanitize(
     b, a = butter(5, high_freq, btype="high")
     try:
         sanitized_audio = filtfilt(b, a, sanitized_audio)
-    except:
+    except Exception:
         pass
 
     # Low-pass filter to remove ultrasonic watermarks
     if paranoid_mode:
-        low_freq = 18000 / nyquist  # Cut off above 18kHz
+        low_freq = min(18000 / nyquist, 0.99)  # Cut off above 18kHz
     else:
-        low_freq = 20000 / nyquist  # Cut off above 20kHz
+        low_freq = min(20000 / nyquist, 0.99)  # Cut off above 20kHz
 
     b, a = butter(5, low_freq, btype="low")
     try:
         sanitized_audio = filtfilt(b, a, sanitized_audio)
-    except:
+    except Exception:
         pass
 
     # 6. Normalize and clip
     print("   🎯 Normalizing and finalizing...")
+    # Replace any NaN/inf from processing
+    sanitized_audio = np.nan_to_num(sanitized_audio, nan=0.0, posinf=1.0, neginf=-1.0)
     # Normalize to prevent clipping
-    if np.max(np.abs(sanitized_audio)) > 0:
-        sanitized_audio = sanitized_audio / np.max(np.abs(sanitized_audio)) * 0.95
+    peak = np.max(np.abs(sanitized_audio))
+    if peak > 0:
+        sanitized_audio = sanitized_audio / peak * 0.95
 
     # Clip to valid range
     sanitized_audio = np.clip(sanitized_audio, -1.0, 1.0)
@@ -246,7 +255,7 @@ def aggressive_sanitize(
         "watermarks_removed": watermarks_removed,
         "watermarks_detected": watermarks_removed,  # For verification compatibility
         "processing_time": total_time,
-        "processing_speed": f"{duration/total_time:.1f}x real-time",
+        "processing_speed": f"{duration/max(total_time, 1e-9):.1f}x real-time",
         "effectiveness": effectiveness,
     }
 

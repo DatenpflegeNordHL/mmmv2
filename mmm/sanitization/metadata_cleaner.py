@@ -122,9 +122,12 @@ class MetadataCleaner:
         }
 
         try:
-            # Method 1: Remove metadata using mutagen
+            # Method 1: Remove metadata using mutagen (operate on copy, not original)
             try:
-                mp3_file = MP3(input_file)
+                import shutil
+
+                shutil.copy2(input_file, output_file)
+                mp3_file = MP3(output_file)
 
                 if mp3_file.tags:
                     tags_count = len(mp3_file.tags)
@@ -253,11 +256,18 @@ class MetadataCleaner:
                     chunk_id = data[pos : pos + 4]
                     chunk_size = int.from_bytes(data[pos + 4 : pos + 8], "little")
 
-                    if chunk_id == b"data ":
+                    if chunk_id == b"data":
                         break  # Stop at data chunk
 
+                    # Prevent infinite loop on zero-size non-data chunks
+                    if chunk_size == 0:
+                        break
+
                     chunk_positions.append((pos, chunk_size))
-                    pos += 8 + chunk_size + (chunk_size % 2)  # Skip padding
+                    advance = 8 + chunk_size + (chunk_size % 2)
+                    if pos + advance <= pos:  # overflow guard
+                        break
+                    pos += advance
 
                 # Remove all chunks before data chunk (metadata)
                 if chunk_positions:
@@ -270,7 +280,7 @@ class MetadataCleaner:
                     )
 
                     # Find data chunk
-                    data_chunk_start = data.find(b"data ", data_start)
+                    data_chunk_start = data.find(b"data", data_start)
                     if data_chunk_start > 0:
                         data_chunk_size = int.from_bytes(
                             data[data_chunk_start + 4 : data_chunk_start + 8], "little"
@@ -282,13 +292,12 @@ class MetadataCleaner:
                             + (data_chunk_size % 2)
                         )
 
-                        # Rebuild minimal WAV file
+                        # Rebuild minimal WAV file: RIFF header + fmt + data only
                         clean_data = bytearray()
                         clean_data.extend(riff_header)
 
-                        # Update RIFF size
-                        file_size = data_chunk_end - 12
-                        clean_data[4:8] = file_size.to_bytes(4, "little")
+                        # Placeholder for RIFF size (will update after assembly)
+                        clean_data[4:8] = b"\x00\x00\x00\x00"
 
                         # Add fmt and data chunks only
                         fmt_start = data.find(b"fmt ", 12)
@@ -303,6 +312,10 @@ class MetadataCleaner:
                             )  # Keep fmt chunk
 
                         clean_data.extend(data[data_chunk_start:data_chunk_end])
+
+                        # Update RIFF size: total file size minus 8 (RIFF id + size field)
+                        riff_size = len(clean_data) - 8
+                        clean_data[4:8] = riff_size.to_bytes(4, "little")
 
                         with open(output_file, "wb") as outfile:
                             outfile.write(clean_data)
@@ -379,8 +392,13 @@ class MetadataCleaner:
 
             # Also check for binary signatures
             with open(file_path, "rb") as f:
-                header = f.read(100)
-                return b"ID3" in header or b"TAG" in header[-128:]
+                header = f.read(10)
+                has_id3v2 = header[:3] == b"ID3"
+                # ID3v1 tag is at the end of the file
+                f.seek(-128, 2)
+                footer = f.read(3)
+                has_id3v1 = footer == b"TAG"
+                return has_id3v2 or has_id3v1
 
         except Exception:
             return False
@@ -408,15 +426,12 @@ class MetadataCleaner:
         if len(data) >= 128 and data[-128:-125] == b"TAG":
             data = data[:-128]
 
-        # Remove APE tags
-        ape_patterns = [b"APETAGEX", b"TAG", b"ID3"]
-        for pattern in ape_patterns:
-            while pattern in data:
-                pos = data.rfind(pattern)
-                if pos > 0:
-                    data = data[:pos]
-                else:
-                    break
+        # Remove APE tags (only strip APETAGEX which is unambiguous;
+        # b"TAG" and b"ID3" are too short and match inside audio data)
+        pattern = b"APETAGEX"
+        pos = data.rfind(pattern)
+        if pos > 0:
+            data = data[:pos]
 
         return bytes(data)
 

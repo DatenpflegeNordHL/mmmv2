@@ -223,7 +223,11 @@ class WatermarkDetector:
                 [np.dot(channel_data[:n - k], channel_data[k:]) for k in range(lag_limit)]
             )
 
-            # Find peaks in autocorrelation
+            # Normalize autocorrelation before peak finding
+            if autocorr[0] != 0:
+                autocorr = autocorr / autocorr[0]
+
+            # Find peaks in normalized autocorrelation
             peaks, properties = signal.find_peaks(autocorr, height=0.1, distance=100)
 
             # Look for suspicious echo delays
@@ -233,7 +237,7 @@ class WatermarkDetector:
             for peak in peaks[1:10]:  # Check first 10 significant peaks
                 delay_samples = peak
                 delay_ms = (delay_samples / sample_rate) * 1000
-                strength = autocorr[peak] / autocorr[0]
+                strength = autocorr[peak]
 
                 # Echo watermarks typically have delays between 1-50ms
                 if 1 <= delay_ms <= 50 and strength > 0.1:
