@@ -1,10 +1,11 @@
+from pathlib import Path
 from setuptools import setup, find_packages
 
 setup(
     name="melodic-metadata-massacrer",
     version="2.0.0",
     description="The audio anonymizer that makes AI detectors cry",
-    long_description=open("README.md").read(),
+    long_description=Path("README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     author="Security Research Team",
     url="https://github.com/research/mmm",
