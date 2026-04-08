@@ -523,7 +523,10 @@ def _handle_upload(app: Flask) -> tuple:
         )
 
         if not result.get("success"):
-            return jsonify({"error": result.get("error", "Sanitization failed.")}), 500
+            app.logger.exception(
+                "Sanitization failed: %s", result.get("error", "unknown internal error")
+            )
+            return jsonify({"error": "Sanitization failed."}), 500
 
         # Register output for download
         output_path = Path(result["output_file"])
