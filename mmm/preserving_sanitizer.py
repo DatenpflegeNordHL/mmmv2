@@ -5,6 +5,7 @@ PRESERVING Sanitizer - Removes threats while keeping audio playable
 """
 
 import os
+import logging
 import librosa
 import numpy as np
 from pathlib import Path
@@ -16,10 +17,13 @@ from scipy.signal import butter, filtfilt
 from pydub import AudioSegment
 import random
 
-# Optimize for all CPU cores
-os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
-os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
-os.environ["NUMBA_NUM_THREADS"] = str(os.cpu_count())
+logger = logging.getLogger(__name__)
+
+def _configure_thread_counts() -> None:
+    """Set thread counts for numeric libraries. Call once before heavy computation."""
+    cpu_count = str(os.cpu_count() or 1)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+        os.environ.setdefault(var, cpu_count)
 
 
 def preserving_sanitize(
@@ -45,13 +49,24 @@ def preserving_sanitize(
     tempo_drift=True,
     onset_velocity=True,
     mfcc_perturb=True,
+    seed=None,
 ):
     """
     Audio sanitization that PRESERVES audio quality while removing threats
 
+    Args:
+        seed: Optional int for reproducible random state. When set, all
+              random operations use this seed, making output deterministic
+              for the same input. Useful for debugging and regression tests.
+
     Returns:
         Dict containing sanitization results
     """
+    _configure_thread_counts()
+
+    if seed is not None:
+        np.random.seed(seed)
+
     print(f"🎵 PRESERVING SANITIZATION - Keeping audio alive!")
     print(f"   Input: {input_file}")
     # Decide output format and path up front so we don't dump WAV data into an MP3 filename
@@ -475,8 +490,8 @@ def _apply_humanization(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
             a_ap = np.array([1.0, coeff])
             try:
                 audio[:, ch] = filtfilt(b_ap, a_ap, audio[:, ch])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Stereo decorrelation filter failed on ch %d: %s", ch, e)
 
     return audio
 
@@ -586,8 +601,8 @@ def _apply_analog_warmth(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.
     try:
         b, a = butter(2, 20 / nyquist, btype="high")
         audio = filtfilt(b, a, audio, axis=0)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Analog warmth high-pass filter failed: %s", e)
 
     # Soft saturation
     audio = np.tanh(audio * drive) / np.tanh(drive)
@@ -644,8 +659,8 @@ def _add_micro_ambience(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
     a = [1, 0, -alpha]
     try:
         audio = filtfilt(b, a, audio, axis=0)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Micro-ambience all-pass filter failed: %s", e)
 
     return audio
 
@@ -700,8 +715,8 @@ def _apply_phase_swirl(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.nd
             a_den = np.array([1, 0, -a])
             try:
                 sig = filtfilt(b, a_den, sig)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Phase swirl filter failed on ch %d: %s", ch, e)
         swirl[:, ch] = sig
 
     return swirl

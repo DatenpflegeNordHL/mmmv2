@@ -2,11 +2,14 @@
 Spectral cleaner for removing frequency-domain watermarks
 """
 
+import logging
 import numpy as np
 from scipy import signal
 from scipy.fft import fft, ifft, fftfreq
 from typing import Dict, List, Any, Tuple
 import librosa
+
+logger = logging.getLogger(__name__)
 
 
 class SpectralCleaner:
@@ -226,13 +229,16 @@ class SpectralCleaner:
             b, a = iirnotch(normalized_freq, q)
             filtered_data = filtfilt(b, a, data)
             return filtered_data
-        except Exception:
+        except Exception as e:
+            logger.warning("Notch filter at %.0f Hz failed: %s", freq, e)
             return data
 
     def _spectral_smoothing(
         self, audio_data: np.ndarray, sample_rate: int
     ) -> Dict[str, Any]:
         """Apply spectral smoothing to hide watermark patterns"""
+        from scipy.ndimage import gaussian_filter
+
         result = {"cleaned_data": audio_data.copy(), "smoothing_applied": True}
 
         # Short-time Fourier Transform
@@ -243,30 +249,9 @@ class SpectralCleaner:
         magnitude = np.abs(stft)
         phase = np.angle(stft)
 
-        # Apply spectral smoothing
-        window_size = 5
-        smoothed_magnitude = np.zeros_like(magnitude)
-
-        for i in range(magnitude.shape[0]):
-            for j in range(magnitude.shape[1]):
-                # Get local window
-                i_start = max(0, i - window_size // 2)
-                i_end = min(magnitude.shape[0], i + window_size // 2 + 1)
-                j_start = max(0, j - window_size // 2)
-                j_end = min(magnitude.shape[1], j + window_size // 2 + 1)
-
-                # Apply weighted average
-                local_window = magnitude[i_start:i_end, j_start:j_end]
-                weights = np.exp(
-                    -0.5 * (np.arange(local_window.shape[0]) - window_size // 2) ** 2
-                )
-                weights = weights.reshape(-1, 1) * np.exp(
-                    -0.5 * (np.arange(local_window.shape[1]) - window_size // 2) ** 2
-                )
-
-                smoothed_magnitude[i, j] = np.sum(local_window * weights) / (
-                    np.sum(weights) + 1e-10
-                )
+        # Gaussian smoothing (sigma=1.0 matches the original per-element
+        # Gaussian weight kernel with window_size=5)
+        smoothed_magnitude = gaussian_filter(magnitude, sigma=1.0)
 
         # Reconstruct signal
         smoothed_stft = smoothed_magnitude * np.exp(1j * phase)

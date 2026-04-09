@@ -14,13 +14,22 @@ class FingerprintRemover:
     Removes statistical fingerprints that identify AI-generated audio
     """
 
-    def __init__(self, paranoid_mode: bool = False):
+    def __init__(
+        self,
+        paranoid_mode: bool = False,
+        target_rms: float = 0.15,
+        entropy_range: tuple = (6.0, 9.0),
+        kurtosis_range: tuple = (1.5, 4.0),
+        skewness_range: tuple = (-0.3, 0.3),
+        temporal_variance: tuple = (0.01, 0.15),
+    ):
         self.paranoid_mode = paranoid_mode
+        self.target_rms = target_rms
         self.human_audio_targets = {
-            "entropy_range": (6.0, 9.0),
-            "kurtosis_range": (1.5, 4.0),
-            "skewness_range": (-0.3, 0.3),
-            "temporal_variance": (0.01, 0.15),
+            "entropy_range": entropy_range,
+            "kurtosis_range": kurtosis_range,
+            "skewness_range": skewness_range,
+            "temporal_variance": temporal_variance,
         }
 
     def remove_fingerprints(
@@ -304,8 +313,7 @@ class FingerprintRemover:
         # RMS-based normalization
         rms = np.sqrt(np.mean(normalized_data**2))
 
-        # Target RMS for human audio (typically around 0.1-0.2)
-        target_rms = 0.15
+        target_rms = self.target_rms
         if rms > 0:
             normalized_data = normalized_data * (target_rms / rms)
 

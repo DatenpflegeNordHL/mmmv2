@@ -353,10 +353,10 @@ def optimize_system():
     """
     import os
 
-    # Set environment variables for better performance
-    os.environ["OMP_NUM_THREADS"] = str(mp.cpu_count())
-    os.environ["MKL_NUM_THREADS"] = str(mp.cpu_count())
-    os.environ["NUMBA_NUM_THREADS"] = str(mp.cpu_count())
+    # Set environment variables for better performance (only if not already set)
+    cpu_count = str(mp.cpu_count() or 1)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+        os.environ.setdefault(var, cpu_count)
 
     # Optimize numpy
     import numpy as np

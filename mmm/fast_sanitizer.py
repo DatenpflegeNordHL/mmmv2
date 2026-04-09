@@ -14,10 +14,11 @@ import soundfile as sf
 import shutil
 from pydub import AudioSegment
 
-# Optimize for all CPU cores
-os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
-os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
-os.environ["NUMBA_NUM_THREADS"] = str(os.cpu_count())
+def _configure_thread_counts() -> None:
+    """Set thread counts for numeric libraries. Call once before heavy computation."""
+    cpu_count = str(os.cpu_count() or 1)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+        os.environ.setdefault(var, cpu_count)
 
 
 def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_count=0):
@@ -27,6 +28,7 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
     Returns:
         Dict containing sanitization results
     """
+    _configure_thread_counts()
     # Choose output format and path (keep extensions honest)
     normalized_format = input_file.suffix.lstrip(".").lower()
     if output_file:

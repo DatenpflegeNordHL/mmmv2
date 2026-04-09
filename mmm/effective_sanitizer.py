@@ -4,20 +4,24 @@ EFFECTIVE Sanitizer - Real audio threat removal that actually works
 """
 
 import os
+import logging
 import librosa
 import numpy as np
 from pathlib import Path
 import time
+
+logger = logging.getLogger(__name__)
 import soundfile as sf
 import shutil
 from scipy.signal import butter, filtfilt, savgol_filter
 from scipy.fft import fft, ifft, fftfreq
 import random
 
-# Optimize for all CPU cores
-os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
-os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
-os.environ["NUMBA_NUM_THREADS"] = str(os.cpu_count())
+def _configure_thread_counts() -> None:
+    """Set thread counts for numeric libraries. Call once before heavy computation."""
+    cpu_count = str(os.cpu_count() or 1)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+        os.environ.setdefault(var, cpu_count)
 
 
 def aggressive_sanitize(
@@ -29,6 +33,7 @@ def aggressive_sanitize(
     Returns:
         Dict containing sanitization results
     """
+    _configure_thread_counts()
     print(f"🔥 EFFECTIVE SANITIZATION - This time it's real!")
     print(f"   Input: {input_file}")
     print(f"   Output: {output_file or 'auto-generated'}")
@@ -131,8 +136,8 @@ def aggressive_sanitize(
 
                 # Replace original band with distorted version
                 sanitized_audio = sanitized_audio - original_band + distorted_band
-            except Exception:
-                pass  # Skip if filter fails
+            except Exception as e:
+                logger.warning("Band filter failed for band %s: %s", freq_range, e)
 
     # 3. Temporal disruption to break patterns
     print("   🎯 Applying temporal pattern disruption...")
@@ -192,8 +197,8 @@ def aggressive_sanitize(
     b, a = butter(5, high_freq, btype="high")
     try:
         sanitized_audio = filtfilt(b, a, sanitized_audio)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("High-pass filter failed: %s", e)
 
     # Low-pass filter to remove ultrasonic watermarks
     if paranoid_mode:
@@ -204,8 +209,8 @@ def aggressive_sanitize(
     b, a = butter(5, low_freq, btype="low")
     try:
         sanitized_audio = filtfilt(b, a, sanitized_audio)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Low-pass filter failed: %s", e)
 
     # 6. Normalize and clip
     print("   🎯 Normalizing and finalizing...")

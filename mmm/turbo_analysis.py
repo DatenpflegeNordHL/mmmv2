@@ -17,10 +17,11 @@ from mmm.optimized_processor import (
     GPUAcceleratedWatermarkDetector,
 )
 
-# Optimize for all CPU cores
-os.environ["OMP_NUM_THREADS"] = str(mp.cpu_count())
-os.environ["MKL_NUM_THREADS"] = str(mp.cpu_count())
-os.environ["NUMBA_NUM_THREADS"] = str(mp.cpu_count())
+def _configure_thread_counts() -> None:
+    """Set thread counts for numeric libraries. Call once before heavy computation."""
+    cpu_count = str(mp.cpu_count() or 1)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+        os.environ.setdefault(var, cpu_count)
 
 
 def analyze_audio_chunk_gpu(args):
@@ -81,6 +82,8 @@ def turbo_analysis(file_path, chunk_duration=5.0):
     print(f"   File: {file_path}")
     print(f"   Chunk duration: {chunk_duration}s")
     print()
+
+    _configure_thread_counts()
 
     # Initialize optimized processor
     processor = OptimizedAudioProcessor(use_gpu=True, use_multiprocessing=True)
