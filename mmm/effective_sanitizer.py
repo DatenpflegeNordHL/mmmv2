@@ -137,7 +137,7 @@ def aggressive_sanitize(
                 # Replace original band with distorted version
                 sanitized_audio = sanitized_audio - original_band + distorted_band
             except Exception as e:
-                logger.warning("Band filter failed for band %s: %s", freq_range, e)
+                logger.warning("Band filter failed for band %.0f-%.0f Hz: %s", low_freq, high_freq, e)
 
     # 3. Temporal disruption to break patterns
     print("   🎯 Applying temporal pattern disruption...")
