@@ -40,6 +40,11 @@ def preserving_sanitize(
     hf_decorrelate=False,
     refined_transient=False,
     adaptive_transient=False,
+    spectral_clean=True,
+    fingerprint_remove=True,
+    tempo_drift=True,
+    onset_velocity=True,
+    mfcc_perturb=True,
 ):
     """
     Audio sanitization that PRESERVES audio quality while removing threats
@@ -120,6 +125,25 @@ def preserving_sanitize(
     print("   🎯 Applying GENTLE spectral modification...")
     sanitized_audio = _gentle_spectral_phase_noise(sanitized_audio, sr, paranoid_mode)
 
+    # 1b. Remove spectral watermarks (known frequency bands, periodic patterns)
+    if spectral_clean:
+        print("   🎯 Removing spectral watermarks...")
+        sanitized_audio = _apply_spectral_watermark_cleaning(
+            sanitized_audio, sr, paranoid_mode
+        )
+
+    # 1c. Remove statistical fingerprints (entropy, kurtosis, timing patterns)
+    if fingerprint_remove:
+        print("   🎯 Removing statistical fingerprints...")
+        sanitized_audio = _apply_fingerprint_removal(
+            sanitized_audio, sr, paranoid_mode
+        )
+
+    # Restore RMS after watermark/fingerprint removal
+    mid_rms = np.sqrt(np.mean(sanitized_audio**2))
+    if mid_rms > 0:
+        sanitized_audio = sanitized_audio * (original_rms / mid_rms)
+
     # 2. Add very subtle noise only to high-frequency bands + low floor dither
     print("   🎯 Adding SUBTLE high-frequency noise and human dither...")
     sanitized_audio = _add_hf_noise_and_dither(sanitized_audio, sr, paranoid_mode)
@@ -192,6 +216,25 @@ def preserving_sanitize(
             sanitized_audio = _apply_adaptive_transient_shift(
                 sanitized_audio, sr, paranoid_mode
             )
+
+    # 7b. Onset velocity variation (break AI-consistent attack energy)
+    if onset_velocity:
+        print("   🎯 Applying onset velocity variation...")
+        sanitized_audio = _apply_onset_velocity_variation(
+            sanitized_audio, sr, paranoid_mode
+        )
+
+    # 7c. Long-range tempo drift (break AI-perfect BPM)
+    if tempo_drift:
+        print("   🎯 Applying long-range tempo drift...")
+        sanitized_audio = _apply_long_range_tempo_drift(
+            sanitized_audio, sr, paranoid_mode
+        )
+
+    # 7d. MFCC-targeted perturbation (defeat MFCC-based classifiers)
+    if mfcc_perturb:
+        print("   🎯 Applying MFCC perturbation...")
+        sanitized_audio = _apply_mfcc_perturbation(sanitized_audio, sr, paranoid_mode)
 
     # 8. Restore a touch of clarity lost to masking
     print("   🎯 Restoring clarity tilt...")
@@ -861,8 +904,8 @@ def _apply_transient_micro_shift(
     )
     onset_samples = librosa.frames_to_samples(onsets, hop_length=hop)
 
-    max_shift = int(0.0001 * sr) if paranoid_mode else int(0.00008 * sr)  # up to ~0.1ms
-    mix = 0.12 if paranoid_mode else 0.08  # keep strong bias to original
+    max_shift = int(0.005 * sr) if paranoid_mode else int(0.003 * sr)  # ~5ms / ~3ms (human-scale)
+    mix = 0.65 if paranoid_mode else 0.5
     for pos in onset_samples:
         start = max(0, pos - win)
         end = min(n, pos + win)
@@ -992,8 +1035,8 @@ def _apply_refined_transient_shift(
     )
     onset_samples = (onsets * sr).astype(int)
 
-    max_shift = int(0.00005 * sr) if paranoid_mode else int(0.00004 * sr)  # ~0.05ms
-    mix = 0.08 if paranoid_mode else 0.05
+    max_shift = int(0.004 * sr) if paranoid_mode else int(0.002 * sr)  # ~4ms / ~2ms (human-scale)
+    mix = 0.55 if paranoid_mode else 0.4
     for pos in onset_samples:
         start = max(0, pos - win)
         end = min(n, pos + win)
@@ -1037,8 +1080,8 @@ def _apply_adaptive_transient_shift(
     else:
         env_norm = np.array([])
 
-    base_shift = 0.00004 if paranoid_mode else 0.00003  # ~0.03-0.04ms
-    max_shift = 0.00008 if paranoid_mode else 0.00006
+    base_shift = 0.002 if paranoid_mode else 0.0015  # ~2ms / ~1.5ms base (human-scale)
+    max_shift = 0.008 if paranoid_mode else 0.005  # ~8ms / ~5ms max
 
     for idx, pos in enumerate(onset_samples):
         strength = env_norm[idx] if idx < len(env_norm) else 0.0
@@ -1059,12 +1102,264 @@ def _apply_adaptive_transient_shift(
         for ch in range(channels):
             region_shifted = np.clip(region + actual_shift, 0, n - 1)
             fade = np.linspace(0, 1, len(region))
-            mix = 0.06 if paranoid_mode else 0.04
+            mix = 0.55 if paranoid_mode else 0.4
             shifted[region, ch] = (1 - fade * mix) * shifted[region, ch] + (
                 fade * mix
             ) * audio[region_shifted, ch]
 
     return shifted
+
+
+def _apply_spectral_watermark_cleaning(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
+    """
+    Delegate to SpectralCleaner to remove known watermark frequency bands,
+    periodic patterns, and synchronization tones.
+    """
+    from mmm.sanitization.spectral_cleaner import SpectralCleaner
+
+    n, channels = audio.shape
+    if n == 0:
+        return audio
+
+    cleaner = SpectralCleaner(paranoid_mode=paranoid_mode)
+
+    # SpectralCleaner handles stereo internally via channel loop
+    result = cleaner.clean_watermarks(audio, sr)
+    cleaned = result["cleaned_audio"]
+
+    # Ensure shape consistency (SpectralCleaner may return 1D for mono)
+    if cleaned.ndim == 1:
+        cleaned = cleaned.reshape(-1, 1)
+    # Trim or pad if length changed
+    if cleaned.shape[0] > n:
+        cleaned = cleaned[:n]
+    elif cleaned.shape[0] < n:
+        pad_len = n - cleaned.shape[0]
+        cleaned = np.pad(cleaned, ((0, pad_len), (0, 0)), mode="edge")
+
+    return cleaned
+
+
+def _apply_fingerprint_removal(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
+    """
+    Delegate to FingerprintRemover for statistical normalization,
+    temporal randomization, phase randomization, micro-timing perturbation,
+    and human imperfections.
+    """
+    from mmm.sanitization.fingerprint_remover import FingerprintRemover
+
+    n, channels = audio.shape
+    if n == 0:
+        return audio
+
+    remover = FingerprintRemover(paranoid_mode=paranoid_mode)
+
+    result = remover.remove_fingerprints(audio, sr)
+    cleaned = result["cleaned_audio"]
+
+    if cleaned.ndim == 1:
+        cleaned = cleaned.reshape(-1, 1)
+    if cleaned.shape[0] > n:
+        cleaned = cleaned[:n]
+    elif cleaned.shape[0] < n:
+        pad_len = n - cleaned.shape[0]
+        cleaned = np.pad(cleaned, ((0, pad_len), (0, 0)), mode="edge")
+
+    return cleaned
+
+
+def _apply_onset_velocity_variation(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
+    """
+    Vary onset amplitude to break AI-consistent attack energy.
+    Human performance naturally varies onset velocity by +-10-25%.
+    Uses AR(1) correlated noise for natural feel.
+    """
+    n, channels = audio.shape
+    if n < sr:
+        return audio
+
+    output = audio.copy()
+
+    hop = 512
+    win = 1024
+    onset_env = librosa.onset.onset_strength(
+        y=audio.mean(axis=1), sr=sr, hop_length=hop, n_fft=win
+    )
+    onsets = librosa.onset.onset_detect(
+        onset_envelope=onset_env, sr=sr, hop_length=hop, backtrack=True
+    )
+    onset_samples = librosa.frames_to_samples(onsets, hop_length=hop)
+
+    if len(onset_samples) == 0:
+        return audio
+
+    variation_range = 0.15 if paranoid_mode else 0.08
+    attack_ms = 25 if paranoid_mode else 20
+    attack_samples = int(attack_ms * sr / 1000)
+
+    # AR(1) correlated gains for natural performance feel
+    gains = np.zeros(len(onset_samples))
+    gains[0] = np.random.uniform(-variation_range, variation_range)
+    for i in range(1, len(gains)):
+        gains[i] = 0.3 * gains[i - 1] + 0.7 * np.random.uniform(
+            -variation_range, variation_range
+        )
+
+    for idx, pos in enumerate(onset_samples):
+        if pos >= n:
+            continue
+        gain = 1.0 + gains[idx]
+
+        region_end = min(n, pos + attack_samples)
+        region_len = region_end - pos
+        if region_len < 4:
+            continue
+
+        # Smooth envelope: ramp from 1.0 to gain, then back to 1.0
+        env = np.ones(region_len)
+        half = region_len // 2
+        env[:half] = np.linspace(1.0, gain, half)
+        env[half:] = np.linspace(gain, 1.0, region_len - half)
+
+        for ch in range(channels):
+            output[pos:region_end, ch] *= env
+
+    return output
+
+
+def _apply_long_range_tempo_drift(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
+    """
+    Apply slow, smooth tempo drift to break AI-perfect BPM consistency.
+    Human performances drift +-1-3 BPM over minutes. AI generators produce
+    mathematically constant tempo -- the strongest temporal detection signal
+    for long tracks.
+    """
+    n, channels = audio.shape
+    if n < sr * 5:
+        return audio
+
+    duration = n / sr
+    t = np.linspace(0, duration, n)
+
+    max_drift_frac = 0.015 if paranoid_mode else 0.008
+
+    # Sum of slow sinusoids with random phases for natural feel
+    drift = np.zeros(n)
+    for _ in range(4):
+        period = (
+            np.random.uniform(15, 35) if paranoid_mode else np.random.uniform(20, 45)
+        )
+        phase = np.random.uniform(0, 2 * np.pi)
+        amplitude = max_drift_frac * np.random.uniform(0.3, 1.0)
+        drift += amplitude * np.sin(2 * np.pi * t / period + phase)
+
+    # Add low-frequency Brownian component
+    brown = np.cumsum(np.random.normal(0, 1, n))
+    cutoff = 0.05 / (sr / 2)
+    if 0 < cutoff < 1.0:
+        b, a = butter(2, cutoff, btype="low")
+        brown = filtfilt(b, a, brown)
+    max_brown = np.max(np.abs(brown))
+    if max_brown > 0:
+        brown = brown / max_brown * max_drift_frac * 0.3
+    drift += brown
+
+    # Normalize drift and apply fade-in/fade-out to avoid endpoint artifacts
+    max_drift = np.max(np.abs(drift))
+    if max_drift > 0:
+        drift = drift / max_drift * max_drift_frac
+
+    fade_len = min(int(sr * 2), n // 4)
+    if fade_len > 0:
+        drift[:fade_len] *= np.linspace(0, 1, fade_len)
+        drift[-fade_len:] *= np.linspace(1, 0, fade_len)
+
+    # Convert drift curve to monotonic warp map
+    rate = 1.0 + drift
+    cumulative = np.cumsum(rate)
+    warp_map = cumulative / cumulative[-1] * (n - 1)
+
+    # Interpolate audio along warp map
+    output = np.zeros_like(audio)
+    original_indices = np.arange(n).astype(np.float64)
+    for ch in range(channels):
+        output[:, ch] = np.interp(warp_map, original_indices, audio[:, ch])
+
+    return output
+
+
+def _apply_mfcc_perturbation(
+    audio: np.ndarray, sr: int, paranoid_mode: bool
+) -> np.ndarray:
+    """
+    Perturb MFCC coefficients to defeat MFCC-based AI classifiers.
+    Modifies c1-c6 (the most classification-relevant coefficients),
+    reconstructs via inverse mel, and blends with original at low ratio.
+    """
+    n, channels = audio.shape
+    if n < sr:
+        return audio
+
+    blend = 0.25 if paranoid_mode else 0.15
+    n_fft = 2048
+    hop_length = 512
+    n_mfcc = 13
+    n_mels = 128
+
+    # Per-coefficient perturbation strength (skip c0 = energy)
+    coeff_std = np.zeros(n_mfcc)
+    if paranoid_mode:
+        coeff_std[1:5] = 1.0
+        coeff_std[5:7] = 0.6
+        coeff_std[7:] = 0.2
+    else:
+        coeff_std[1:5] = 0.5
+        coeff_std[5:7] = 0.3
+        coeff_std[7:] = 0.1
+
+    output = audio.copy()
+
+    for ch in range(channels):
+        # Forward: compute mel spectrogram and MFCCs
+        S = librosa.feature.melspectrogram(
+            y=audio[:, ch], sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels
+        )
+        S_db = librosa.power_to_db(S)
+        mfccs = librosa.feature.mfcc(S=S_db, n_mfcc=n_mfcc)
+
+        n_frames = mfccs.shape[1]
+
+        # Generate smooth time-varying perturbation per coefficient
+        for c in range(1, n_mfcc):
+            if coeff_std[c] == 0:
+                continue
+            noise = np.random.normal(0, coeff_std[c], n_frames)
+            smooth_win = max(3, int(0.5 * sr / hop_length))
+            if smooth_win % 2 == 0:
+                smooth_win += 1
+            kernel = np.ones(smooth_win) / smooth_win
+            noise = np.convolve(noise, kernel, mode="same")
+            mfccs[c, :] += noise
+
+        # Inverse: MFCC -> mel spectrogram -> audio
+        S_db_modified = librosa.feature.inverse.mfcc_to_mel(mfccs, n_mels=n_mels)
+        S_modified = librosa.db_to_power(S_db_modified)
+
+        reconstructed = librosa.feature.inverse.mel_to_audio(
+            S_modified, sr=sr, n_fft=n_fft, hop_length=hop_length, length=n
+        )
+
+        output[:, ch] = (1 - blend) * audio[:, ch] + blend * reconstructed
+
+    return output
 
 
 def main():
