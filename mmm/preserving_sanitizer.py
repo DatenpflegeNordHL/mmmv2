@@ -119,6 +119,12 @@ def preserving_sanitize(
     sanitized_audio = audio.copy()
     original_rms = np.sqrt(np.mean(sanitized_audio**2))
 
+    # Preserve per-channel RMS ratio to prevent stereo balance drift
+    channel_rms = np.array(
+        [np.sqrt(np.mean(sanitized_audio[:, ch] ** 2))
+         for ch in range(sanitized_audio.shape[1])]
+    )
+
     print(f"   🔍 Original RMS level: {original_rms:.6f}")
 
     # 1. VERY GENTLE spectral modification
@@ -239,6 +245,12 @@ def preserving_sanitize(
     # 8. Restore a touch of clarity lost to masking
     print("   🎯 Restoring clarity tilt...")
     sanitized_audio = _apply_clarity_tilt(sanitized_audio, sr, paranoid_mode)
+
+    # Restore per-channel stereo balance (prevents L/R drift from independent processing)
+    for ch in range(sanitized_audio.shape[1]):
+        ch_rms = np.sqrt(np.mean(sanitized_audio[:, ch] ** 2))
+        if ch_rms > 0 and channel_rms[ch] > 0:
+            sanitized_audio[:, ch] *= channel_rms[ch] / ch_rms
 
     # 6. Restore original audio level (CRITICAL!)
     print("   🎯 Restoring original audio level...")
@@ -452,11 +464,19 @@ def _apply_humanization(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.n
     gain = np.clip(gain, 0.98, 1.02)
     audio = audio * gain[:, None]
 
-    # Stereo decorrelation: tiny delay on right channel
+    # Stereo decorrelation via per-channel all-pass (no Haas effect)
+    # A time-delay approach pans toward the earlier channel; all-pass
+    # decorrelates phase without shifting the perceived stereo image.
     if channels >= 2:
-        delay_samples = max(1, int(0.0004 * sr))  # ~0.4ms
-        padded = np.pad(audio[:, 1], (delay_samples, 0), mode="edge")[:n]
-        audio[:, 1] = 0.985 * padded + 0.015 * audio[:, 1]  # blend to keep phase sane
+        alpha = 0.02 if paranoid_mode else 0.012
+        for ch in range(channels):
+            coeff = alpha * (1 if ch == 0 else -1)
+            b_ap = np.array([coeff, 1.0])
+            a_ap = np.array([1.0, coeff])
+            try:
+                audio[:, ch] = filtfilt(b_ap, a_ap, audio[:, ch])
+            except Exception:
+                pass
 
     return audio
 
