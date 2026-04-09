@@ -195,7 +195,7 @@ class OptimizedAudioProcessor:
 
 class GPUAcceleratedWatermarkDetector:
     """
-    GPU-accelerated watermark detection for RTX 3080 Ti
+    GPU-accelerated watermark detection
     """
 
     def __init__(self):

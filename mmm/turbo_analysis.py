@@ -59,12 +59,24 @@ def analyze_audio_chunk_gpu(args):
     return results
 
 
+def _detect_gpu_name() -> str:
+    """Detect actual GPU name via CUDA, or report CPU-only mode."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_name(0)
+    except ImportError:
+        pass
+    return "Not detected (CPU mode)"
+
+
 def turbo_analysis(file_path, chunk_duration=5.0):
     """
     Turbo-charged analysis using GPU + Multi-core CPU
     """
+    gpu_name = _detect_gpu_name()
     print(f"🚀 TURBO ANALYSIS - GPU + Multi-Core CPU")
-    print(f"   GPU: NVIDIA GeForce RTX 3080 Ti")
+    print(f"   GPU: {gpu_name}")
     print(f"   CPU: {mp.cpu_count()} cores")
     print(f"   File: {file_path}")
     print(f"   Chunk duration: {chunk_duration}s")
@@ -241,7 +253,8 @@ def turbo_analysis(file_path, chunk_duration=5.0):
 def main():
     """Main function"""
     print("🚀 MMM Turbo Analysis - GPU + Multi-Core Optimization")
-    print("🎵 Maximum performance with RTX 3080 Ti")
+    gpu_name = _detect_gpu_name()
+    print(f"🎵 GPU: {gpu_name}")
     print("=" * 60)
 
     file_path = Path("Schizo Shaman.mp3")

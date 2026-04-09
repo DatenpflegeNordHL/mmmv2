@@ -467,8 +467,17 @@ class ConsoleManager:
         # GPU Status
         gpu_status = Text()
         gpu_status.append("🎮 GPU Status: ", style="bold white")
-        gpu_status.append("NVIDIA GeForce RTX 3080 Ti", style="bold green")
-        gpu_status.append(" - ✅ ENABLED", style="bold green")
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu_status.append(torch.cuda.get_device_name(0), style="bold green")
+                gpu_status.append(" - ✅ ENABLED", style="bold green")
+            else:
+                gpu_status.append("CPU mode", style="bold yellow")
+                gpu_status.append(" - ⚠️ No GPU detected", style="bold yellow")
+        except ImportError:
+            gpu_status.append("CPU mode", style="bold yellow")
+            gpu_status.append(" - ⚠️ torch not installed", style="bold yellow")
 
         self.console.print(Panel(gpu_status, border_style="green"))
 
