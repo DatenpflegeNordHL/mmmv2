@@ -6,7 +6,7 @@ import logging
 import numpy as np
 from scipy import signal
 from scipy.fft import fft, ifft, fftfreq
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any
 import librosa
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,11 @@ class SpectralCleaner:
 
     def __init__(self, paranoid_mode: bool = False):
         self.paranoid_mode = paranoid_mode
+        # Keep analysis bounded so untrusted/large inputs cannot trigger
+        # unreasonably long verification or filter loops.
+        self.max_notch_filters = 20 if paranoid_mode else 12
+        self.max_verification_samples = 131072
+        self.max_autocorr_samples = 16384
         self.watermark_freq_bands = [
             (18000, 18500),  # Known AI watermark ranges
             (19000, 19500),
@@ -198,6 +203,17 @@ class SpectralCleaner:
                 phase_noise = np.random.normal(0, noise_level, len(audio_data))
                 result["cleaned_data"] += phase_noise
 
+        # Bound notch filter passes to avoid pathological runtime on dense spectra
+        if len(peaks) > self.max_notch_filters:
+            peak_heights = properties.get("peak_heights")
+            if peak_heights is not None and len(peak_heights) == len(peaks):
+                strongest = np.argpartition(
+                    peak_heights, -self.max_notch_filters
+                )[-self.max_notch_filters :]
+                peaks = np.sort(peaks[strongest])
+            else:
+                peaks = peaks[: self.max_notch_filters]
+
         # Apply notch filters to suspicious frequencies
         for peak_idx in peaks:
             freq = f[peak_idx]
@@ -297,28 +313,50 @@ class SpectralCleaner:
 
         return result
 
+    def _extract_verification_window(
+        self, data: np.ndarray, max_samples: int
+    ) -> np.ndarray:
+        """Return a centered window so verification cost stays bounded."""
+        if data.shape[0] <= max_samples:
+            return data
+
+        start = (data.shape[0] - max_samples) // 2
+        return data[start : start + max_samples]
+
+    def _to_mono_series(self, data: np.ndarray) -> np.ndarray:
+        """Collapse channels to a single representative series."""
+        if data.ndim == 1:
+            return data
+        return np.mean(data, axis=1)
+
     def _verify_cleaning(
         self, original: np.ndarray, cleaned: np.ndarray, sample_rate: int
     ) -> List[Dict[str, Any]]:
         """Verify that cleaning was effective"""
         verification = []
 
-        # Compute spectral comparison
-        orig_fft = np.abs(fft(original, axis=0))
-        clean_fft = np.abs(fft(cleaned, axis=0))
+        if original.size == 0 or cleaned.size == 0:
+            return verification
 
-        # Calculate spectral difference
-        spectral_diff = np.mean(np.abs(orig_fft - clean_fft), axis=0)
+        original_eval = self._extract_verification_window(
+            original, self.max_verification_samples
+        )
+        cleaned_eval = self._extract_verification_window(
+            cleaned, self.max_verification_samples
+        )
+
+        # Compute spectral comparison
+        orig_fft = np.abs(np.fft.rfft(original_eval, axis=0))
+        clean_fft = np.abs(np.fft.rfft(cleaned_eval, axis=0))
 
         # Check high frequency reduction
-        freqs = fftfreq(len(original), 1 / sample_rate)
-        high_freq_mask = np.abs(freqs) > 15000
+        freqs = np.fft.rfftfreq(len(original_eval), 1 / sample_rate)
+        high_freq_mask = freqs > 15000
 
         if np.any(high_freq_mask):
             orig_hf_power = np.mean(orig_fft[high_freq_mask])
             clean_hf_power = np.mean(clean_fft[high_freq_mask])
-
-            if clean_hf_power < orig_hf_power * 0.5:
+            if orig_hf_power > 0 and clean_hf_power < orig_hf_power * 0.5:
                 verification.append(
                     {
                         "metric": "high_frequency_reduction",
@@ -331,16 +369,29 @@ class SpectralCleaner:
                 )
 
         # Check for pattern disruption
-        orig_autocorr = np.correlate(
-            original.flatten(), original.flatten(), mode="same"
+        orig_series = self._extract_verification_window(
+            self._to_mono_series(original_eval), self.max_autocorr_samples
         )
-        clean_autocorr = np.correlate(cleaned.flatten(), cleaned.flatten(), mode="same")
+        clean_series = self._extract_verification_window(
+            self._to_mono_series(cleaned_eval), self.max_autocorr_samples
+        )
 
-        orig_peaks = len(
-            signal.find_peaks(orig_autocorr, height=np.max(orig_autocorr) * 0.8)[0]
+        orig_series = (orig_series - np.mean(orig_series)).astype(np.float32, copy=False)
+        clean_series = (clean_series - np.mean(clean_series)).astype(np.float32, copy=False)
+
+        orig_autocorr = signal.correlate(
+            orig_series, orig_series, mode="same", method="fft"
         )
+        clean_autocorr = signal.correlate(
+            clean_series, clean_series, mode="same", method="fft"
+        )
+
+        orig_height = np.max(orig_autocorr) * 0.8 if orig_autocorr.size else 0.0
+        clean_height = np.max(clean_autocorr) * 0.8 if clean_autocorr.size else 0.0
+
+        orig_peaks = len(signal.find_peaks(orig_autocorr, height=orig_height)[0])
         clean_peaks = len(
-            signal.find_peaks(clean_autocorr, height=np.max(clean_autocorr) * 0.8)[0]
+            signal.find_peaks(clean_autocorr, height=clean_height)[0]
         )
 
         if clean_peaks < orig_peaks:
