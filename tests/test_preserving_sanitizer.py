@@ -437,8 +437,8 @@ class TestMfccPerturbationSafety:
         )
         fake_librosa = SimpleNamespace(
             feature=fake_feature,
-            power_to_db=lambda S: np.zeros_like(S),
-            db_to_power=lambda S_db: np.ones_like(S_db),
+            power_to_db=np.zeros_like,
+            db_to_power=np.ones_like,
         )
 
         monkeypatch.setattr(preserving_module, "librosa", fake_librosa)
@@ -467,8 +467,8 @@ class TestMfccPerturbationSafety:
         )
         fake_librosa = SimpleNamespace(
             feature=fake_feature,
-            power_to_db=lambda S: np.zeros_like(S),
-            db_to_power=lambda S_db: np.ones_like(S_db),
+            power_to_db=np.zeros_like,
+            db_to_power=np.ones_like,
         )
 
         monkeypatch.setattr(preserving_module, "librosa", fake_librosa)
