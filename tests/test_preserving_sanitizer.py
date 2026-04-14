@@ -7,8 +7,10 @@ import numpy as np
 import tempfile
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 import soundfile as sf
 
+import mmm.preserving_sanitizer as preserving_module
 from mmm.preserving_sanitizer import (
     preserving_sanitize,
     _ensure_channel_layout,
@@ -28,6 +30,8 @@ from mmm.preserving_sanitizer import (
     _apply_dynamic_comb_mask,
     _apply_transient_micro_shift,
     _apply_micro_eq_modulation,
+    _apply_mfcc_perturbation,
+    _repair_non_finite_audio,
 )
 
 
@@ -400,6 +404,79 @@ class TestApplyMicroEqModulation:
         """Test output shape matches input"""
         result = _apply_micro_eq_modulation(self.audio, self.sample_rate, False)
         assert result.shape == self.audio.shape
+
+
+class TestMfccPerturbationSafety:
+    """Safety tests for MFCC perturbation numeric stability."""
+
+    def test_repair_non_finite_audio(self):
+        """NaN/Inf values are replaced with finite clipped samples."""
+        audio = np.array([[np.nan, np.inf], [-np.inf, 0.5]], dtype=np.float32)
+        repaired = _repair_non_finite_audio(audio, label="unit-test")
+
+        assert np.all(np.isfinite(repaired))
+        assert np.max(np.abs(repaired)) <= 1.0
+
+    def test_mfcc_perturbation_fallback_on_reconstruction_failure(self, monkeypatch):
+        """MFCC perturbation should keep original channel when inverse fails."""
+        n = 44100
+        audio = np.column_stack(
+            [0.5 * np.sin(2 * np.pi * 440 * np.arange(n) / 44100)]
+        ).astype(np.float32)
+
+        fake_inverse = SimpleNamespace(
+            mfcc_to_mel=lambda mfccs, n_mels=128: np.ones((n_mels, mfccs.shape[1])),
+            mel_to_audio=lambda *args, **kwargs: (_ for _ in ()).throw(
+                ValueError("forced inverse failure")
+            ),
+        )
+        fake_feature = SimpleNamespace(
+            melspectrogram=lambda **kwargs: np.ones((128, 12), dtype=np.float32),
+            mfcc=lambda S, n_mfcc=13: np.ones((n_mfcc, S.shape[1]), dtype=np.float32),
+            inverse=fake_inverse,
+        )
+        fake_librosa = SimpleNamespace(
+            feature=fake_feature,
+            power_to_db=lambda S: np.zeros_like(S),
+            db_to_power=lambda S_db: np.ones_like(S_db),
+        )
+
+        monkeypatch.setattr(preserving_module, "librosa", fake_librosa)
+        result = _apply_mfcc_perturbation(audio.copy(), 44100, paranoid_mode=False)
+
+        assert result.shape == audio.shape
+        assert np.all(np.isfinite(result))
+        assert np.allclose(result, audio)
+
+    def test_mfcc_perturbation_fallback_on_non_finite_reconstruction(self, monkeypatch):
+        """Non-finite reconstructed audio should be rejected and fallback to source."""
+        n = 44100
+        audio = np.column_stack(
+            [0.5 * np.sin(2 * np.pi * 440 * np.arange(n) / 44100)]
+        ).astype(np.float32)
+
+        bad_reconstruction = np.full(n, np.inf, dtype=np.float32)
+        fake_inverse = SimpleNamespace(
+            mfcc_to_mel=lambda mfccs, n_mels=128: np.ones((n_mels, mfccs.shape[1])),
+            mel_to_audio=lambda *args, **kwargs: bad_reconstruction,
+        )
+        fake_feature = SimpleNamespace(
+            melspectrogram=lambda **kwargs: np.ones((128, 12), dtype=np.float32),
+            mfcc=lambda S, n_mfcc=13: np.ones((n_mfcc, S.shape[1]), dtype=np.float32),
+            inverse=fake_inverse,
+        )
+        fake_librosa = SimpleNamespace(
+            feature=fake_feature,
+            power_to_db=lambda S: np.zeros_like(S),
+            db_to_power=lambda S_db: np.ones_like(S_db),
+        )
+
+        monkeypatch.setattr(preserving_module, "librosa", fake_librosa)
+        result = _apply_mfcc_perturbation(audio.copy(), 44100, paranoid_mode=True)
+
+        assert result.shape == audio.shape
+        assert np.all(np.isfinite(result))
+        assert np.allclose(result, audio)
 
 
 class TestPreservingSanitizeIntegration:

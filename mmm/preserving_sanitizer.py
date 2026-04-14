@@ -14,7 +14,6 @@ import soundfile as sf
 import shutil
 from numpy.fft import fft, ifft, fftfreq
 from scipy.signal import butter, filtfilt
-from pydub import AudioSegment
 import random
 
 logger = logging.getLogger(__name__)
@@ -24,6 +23,17 @@ def _configure_thread_counts() -> None:
     cpu_count = str(os.cpu_count() or 1)
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
         os.environ.setdefault(var, cpu_count)
+
+
+def _repair_non_finite_audio(audio: np.ndarray, label: str = "processing") -> np.ndarray:
+    """Fail-closed repair for NaN/Inf propagation in DSP stages."""
+    if np.all(np.isfinite(audio)):
+        return audio
+
+    logger.warning("Non-finite audio detected after %s; applying safety repair", label)
+    repaired = np.nan_to_num(audio, nan=0.0, posinf=1.0, neginf=-1.0)
+    repaired = np.clip(repaired, -1.0, 1.0)
+    return repaired
 
 
 def preserving_sanitize(
@@ -256,6 +266,9 @@ def preserving_sanitize(
     if mfcc_perturb:
         print("   🎯 Applying MFCC perturbation...")
         sanitized_audio = _apply_mfcc_perturbation(sanitized_audio, sr, paranoid_mode)
+        sanitized_audio = _repair_non_finite_audio(
+            sanitized_audio, label="MFCC perturbation"
+        )
 
     # 8. Restore a touch of clarity lost to masking
     print("   🎯 Restoring clarity tilt...")
@@ -281,6 +294,7 @@ def preserving_sanitize(
         sanitized_audio = sanitized_audio * (original_rms / post_tanh_rms)
 
     # 6. Final quality check
+    sanitized_audio = _repair_non_finite_audio(sanitized_audio, label="finalization")
     final_rms = np.sqrt(np.mean(sanitized_audio**2))
     peak = np.max(np.abs(sanitized_audio))
     print(f"   📊 Final audio stats: RMS={final_rms:.6f}, Peak={peak:.4f}")
@@ -309,6 +323,14 @@ def preserving_sanitize(
         )
 
         if normalized_format == "mp3":
+            try:
+                from pydub import AudioSegment
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"MP3 export requires pydub/ffmpeg: {e}",
+                }
+
             segment = AudioSegment(
                 sanitized_audio_int16.tobytes(),
                 frame_rate=sr,
@@ -1363,36 +1385,84 @@ def _apply_mfcc_perturbation(
     output = audio.copy()
 
     for ch in range(channels):
-        # Forward: compute mel spectrogram and MFCCs
-        S = librosa.feature.melspectrogram(
-            y=audio[:, ch], sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels
-        )
-        S_db = librosa.power_to_db(S)
-        mfccs = librosa.feature.mfcc(S=S_db, n_mfcc=n_mfcc)
+        try:
+            # Forward: compute mel spectrogram and MFCCs
+            source = np.nan_to_num(audio[:, ch], nan=0.0, posinf=0.0, neginf=0.0)
+            S = librosa.feature.melspectrogram(
+                y=source, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels
+            )
+            S = np.maximum(np.nan_to_num(S, nan=0.0, posinf=0.0, neginf=0.0), 1e-10)
+            S_db = librosa.power_to_db(S)
+            S_db = np.nan_to_num(S_db, nan=-80.0, posinf=0.0, neginf=-80.0)
+            mfccs = librosa.feature.mfcc(S=S_db, n_mfcc=n_mfcc)
 
-        n_frames = mfccs.shape[1]
+            n_frames = mfccs.shape[1]
 
-        # Generate smooth time-varying perturbation per coefficient
-        for c in range(1, n_mfcc):
-            if coeff_std[c] == 0:
-                continue
-            noise = np.random.normal(0, coeff_std[c], n_frames)
-            smooth_win = max(3, int(0.5 * sr / hop_length))
-            if smooth_win % 2 == 0:
-                smooth_win += 1
-            kernel = np.ones(smooth_win) / smooth_win
-            noise = np.convolve(noise, kernel, mode="same")
-            mfccs[c, :] += noise
+            # Generate smooth time-varying perturbation per coefficient
+            for c in range(1, n_mfcc):
+                if coeff_std[c] == 0:
+                    continue
+                noise = np.random.normal(0, coeff_std[c], n_frames)
+                smooth_win = max(3, int(0.5 * sr / hop_length))
+                if smooth_win % 2 == 0:
+                    smooth_win += 1
+                kernel = np.ones(smooth_win) / smooth_win
+                noise = np.convolve(noise, kernel, mode="same")
+                mfccs[c, :] += noise
 
-        # Inverse: MFCC -> mel spectrogram -> audio
-        S_db_modified = librosa.feature.inverse.mfcc_to_mel(mfccs, n_mels=n_mels)
-        S_modified = librosa.db_to_power(S_db_modified)
+            # Inverse: MFCC -> mel spectrogram -> audio
+            S_db_modified = librosa.feature.inverse.mfcc_to_mel(mfccs, n_mels=n_mels)
+            S_db_modified = np.nan_to_num(
+                S_db_modified, nan=-80.0, posinf=0.0, neginf=-80.0
+            )
+            # Bound dB to keep reconstruction numerically stable
+            S_db_modified = np.clip(
+                S_db_modified, -100.0, 18.0 if paranoid_mode else 12.0
+            )
 
-        reconstructed = librosa.feature.inverse.mel_to_audio(
-            S_modified, sr=sr, n_fft=n_fft, hop_length=hop_length, length=n
-        )
+            S_modified = librosa.db_to_power(S_db_modified)
+            S_modified = np.maximum(
+                np.nan_to_num(S_modified, nan=0.0, posinf=0.0, neginf=0.0), 0.0
+            )
 
-        output[:, ch] = (1 - blend) * audio[:, ch] + blend * reconstructed
+            src_energy = float(np.mean(S))
+            mod_energy = float(np.mean(S_modified))
+            if src_energy > 0 and mod_energy > 0 and np.isfinite(src_energy + mod_energy):
+                S_modified = S_modified * (src_energy / mod_energy)
+
+            # Cap extreme mel bins to prevent unstable Griffin-Lim iterations
+            cap = np.percentile(S_modified, 99.9)
+            if np.isfinite(cap) and cap > 0:
+                S_modified = np.clip(S_modified, 0.0, cap * 6.0)
+
+            reconstructed = librosa.feature.inverse.mel_to_audio(
+                S_modified,
+                sr=sr,
+                n_fft=n_fft,
+                hop_length=hop_length,
+                length=n,
+                n_iter=16 if not paranoid_mode else 24,
+            )
+            reconstructed = np.nan_to_num(
+                reconstructed, nan=0.0, posinf=0.0, neginf=0.0
+            )
+            if not np.all(np.isfinite(reconstructed)):
+                raise ValueError("mel reconstruction produced non-finite output")
+
+            src_rms = np.sqrt(np.mean(source**2))
+            rec_rms = np.sqrt(np.mean(reconstructed**2))
+            if src_rms > 0 and rec_rms > 0:
+                reconstructed = reconstructed * (src_rms / rec_rms)
+
+            blended = (1 - blend) * source + blend * reconstructed
+            output[:, ch] = np.nan_to_num(blended, nan=0.0, posinf=0.0, neginf=0.0)
+        except Exception as e:
+            logger.warning(
+                "MFCC perturbation failed on channel %d; keeping original channel (%s)",
+                ch,
+                e,
+            )
+            output[:, ch] = audio[:, ch]
 
     return output
 
