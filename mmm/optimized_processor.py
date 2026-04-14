@@ -31,6 +31,15 @@ except ImportError:
     print("💻 GPU not available, using CPU-only mode")
 
 
+def _detect_chunk_watermarks(args: Tuple[np.ndarray, int]) -> Dict[str, Any]:
+    """Top-level worker for process pools (must be picklable)."""
+    audio_chunk, sample_rate = args
+    from .detection.watermark_detector import WatermarkDetector
+
+    detector = WatermarkDetector()
+    return detector.detect_all(audio_chunk, sample_rate)
+
+
 class OptimizedAudioProcessor:
     """
     High-performance audio processor using multi-core CPU and GPU acceleration
@@ -72,8 +81,16 @@ class OptimizedAudioProcessor:
         """
         Process audio in parallel chunks using all available cores
         """
+        if process_func is None:
+            raise ValueError("process_func is required")
+
         chunk_samples = int(chunk_duration * sample_rate)
         overlap_samples = int(chunk_overlap * sample_rate)
+        if chunk_samples <= 0:
+            raise ValueError("chunk_duration must be greater than 0")
+        if overlap_samples < 0 or overlap_samples >= chunk_samples:
+            raise ValueError("chunk_overlap must be >= 0 and less than chunk_duration")
+
         step_size = chunk_samples - overlap_samples
 
         # Create chunks
@@ -81,6 +98,8 @@ class OptimizedAudioProcessor:
         for start in range(0, len(audio_data) - chunk_samples + 1, step_size):
             end = min(start + chunk_samples, len(audio_data))
             chunks.append(audio_data[start:end])
+        if not chunks and len(audio_data) > 0:
+            chunks.append(audio_data)
 
         print(f"📊 Processing {len(chunks)} chunks ({chunk_duration}s each)")
         print(f"   Total audio: {len(audio_data)/sample_rate:.1f} seconds")
@@ -110,24 +129,29 @@ class OptimizedAudioProcessor:
 
         # Create chunks
         chunks = []
-        chunk_positions = []
         for start in range(0, len(audio_data), chunk_samples):
             end = min(start + chunk_samples, len(audio_data))
             chunks.append(audio_data[start:end])
-            chunk_positions.append((start, end))
 
         print(f"🔍 Running parallel watermark detection on {len(chunks)} chunks")
-
-        # Detection function for each chunk
-        def detect_chunk(audio_chunk, chunk_idx):
-            return detector.detect_all(audio_chunk, sample_rate)
+        if not chunks:
+            return {
+                "detected": [],
+                "method_results": {},
+                "confidence_scores": {},
+                "watermark_count": 0,
+                "chunk_count": 0,
+                "overall_confidence": 0,
+            }
 
         # Process in parallel
         if self.use_multiprocessing and len(chunks) > 1:
-            with ProcessPoolExecutor(max_workers=self.num_cores) as executor:
-                results = list(executor.map(detect_chunk, chunks))
+            max_workers = min(self.num_cores, len(chunks))
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                args = ((chunk, sample_rate) for chunk in chunks)
+                results = list(executor.map(_detect_chunk_watermarks, args))
         else:
-            results = [detect_chunk(chunk, i) for i, chunk in enumerate(chunks)]
+            results = [detector.detect_all(chunk, sample_rate) for chunk in chunks]
 
         # Aggregate results
         aggregated = {
@@ -162,11 +186,17 @@ class OptimizedAudioProcessor:
             return librosa.stft(audio_data, n_fft=n_fft, hop_length=hop_length)
 
         try:
-            # Transfer to GPU
-            audio_gpu = cp.asarray(audio_data)
+            audio_gpu = cp.asarray(audio_data, dtype=cp.float32)
+            if audio_gpu.ndim != 1:
+                audio_gpu = cp.mean(audio_gpu, axis=1)
+            if audio_gpu.size < n_fft:
+                audio_gpu = cp.pad(audio_gpu, (0, n_fft - audio_gpu.size))
 
-            # GPU STFT
-            stft_gpu = cp.fft.rfft(audio_gpu, n=n_fft)
+            window = cp.hanning(n_fft, dtype=cp.float32)
+            frames = cp.lib.stride_tricks.sliding_window_view(audio_gpu, n_fft)[
+                ::hop_length
+            ]
+            stft_gpu = cp.fft.rfft(frames * window, axis=1).T
 
             # Transfer back to CPU
             return cp.asnumpy(stft_gpu)
@@ -176,19 +206,19 @@ class OptimizedAudioProcessor:
 
     def optimize_librosa_performance(self):
         """
-        Configure librosa for maximum performance
+        Configure runtime thread/CPU affinity hints for audio workloads.
         """
-        import librosa
-        import threading
-
-        # Use multiple threads for librosa operations
-        librosa.set_audio_backend("soundfile")
-        librosa.set_max_threads(self.num_cores)
+        core_count = str(self.num_cores or 1)
+        for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+            os.environ.setdefault(var, core_count)
 
         # Set thread affinity for better performance
         if hasattr(os, "sched_setaffinity"):
-            pid = os.getpid()
-            os.sched_setaffinity(pid, range(self.num_cores))
+            try:
+                pid = os.getpid()
+                os.sched_setaffinity(pid, set(range(self.num_cores)))
+            except (OSError, ValueError):
+                pass
 
         print(f"⚡ Optimized for {self.num_cores} CPU cores")
 
@@ -231,6 +261,8 @@ class GPUAcceleratedWatermarkDetector:
         import torch
 
         # Convert to PyTorch tensor on GPU
+        if audio_data.ndim > 1:
+            audio_data = np.mean(audio_data, axis=1)
         audio_tensor = torch.from_numpy(audio_data).float().to(self.device)
 
         # GPU FFT computation
@@ -238,19 +270,28 @@ class GPUAcceleratedWatermarkDetector:
         magnitude = torch.abs(fft_tensor)
 
         # Create frequency array
-        freqs = torch.fft.fftfreq(len(audio_tensor), 1 / sample_rate)
+        freqs = torch.fft.fftfreq(
+            audio_tensor.shape[0], 1 / sample_rate, device=self.device
+        )
 
         # GPU-based high frequency analysis
         high_freq_mask = torch.abs(freqs) > 15000
-        high_freq_power = torch.mean(magnitude[high_freq_mask])
+        if bool(torch.any(high_freq_mask).item()):
+            high_freq_power = torch.mean(magnitude[high_freq_mask])
+            high_freq_power_val = float(high_freq_power.item())
+        else:
+            high_freq_power_val = 0.0
 
         # Check for suspicious high frequency content
         threshold = torch.median(magnitude) * 5
-        suspicious = high_freq_power > threshold
+        threshold_val = float(threshold.item()) if threshold.numel() else 0.0
+        suspicious = threshold_val > 0 and high_freq_power_val > threshold_val
 
-        raw_confidence = float(high_freq_power / threshold) if threshold > 0 else 0.0
+        raw_confidence = (
+            high_freq_power_val / threshold_val if threshold_val > 0 else 0.0
+        )
         return {
-            "detected": suspicious,
+            "detected": bool(suspicious),
             "confidence": max(0.0, min(1.0, raw_confidence)),
             "details": ["GPU-accelerated spectral analysis"],
         }
@@ -377,5 +418,5 @@ def optimize_system():
         if result.returncode == 0:
             print("🎮 NVIDIA GPU Status:")
             print(result.stdout)
-    except:
+    except Exception:
         pass

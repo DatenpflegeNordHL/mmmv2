@@ -71,6 +71,16 @@ def _detect_gpu_name() -> str:
     return "Not detected (CPU mode)"
 
 
+def _is_gpu_available() -> bool:
+    """Return True when CUDA is available in the current environment."""
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except ImportError:
+        return False
+
+
 def turbo_analysis(file_path, chunk_duration=5.0):
     """
     Turbo-charged analysis using GPU + Multi-core CPU
@@ -184,7 +194,10 @@ def turbo_analysis(file_path, chunk_duration=5.0):
     print(f"   Audio loading time: {load_time:.2f} seconds")
     print(f"   Processing time: {elapsed:.2f} seconds")
     print(f"   Real-time factor: {total_duration/elapsed:.1f}x")
-    print(f"   GPU acceleration: ✅ ENABLED")
+    print(
+        "   GPU acceleration: "
+        + ("✅ ENABLED" if _is_gpu_available() else "❌ DISABLED (CPU fallback)")
+    )
     print(f"   CPU cores utilized: {min(mp.cpu_count(), 4)}")
     print(f"   Throughput: {(total_duration/elapsed)*60:.1f} audio-minutes/min")
 

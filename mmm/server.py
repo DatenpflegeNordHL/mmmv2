@@ -383,6 +383,25 @@ def _cleanup_old_files(directory: Path, max_age: int = DEFAULT_STALE_AGE) -> Non
         pass
 
 
+def _cleanup_download_registry(
+    registry: Dict[str, Dict[str, Any]], max_age: int = DEFAULT_STALE_AGE
+) -> None:
+    """Drop stale download tokens and unlink stale files."""
+    now = time.time()
+    stale_tokens = []
+    for token, entry in registry.items():
+        created = float(entry.get("created", 0))
+        if now - created > max_age:
+            stale_tokens.append(token)
+
+    for token in stale_tokens:
+        entry = registry.pop(token, None)
+        if not entry:
+            continue
+        stale_path = Path(str(entry.get("path", "")))
+        stale_path.unlink(missing_ok=True)
+
+
 # ---------------------------------------------------------------------------
 # Flask application factory
 # ---------------------------------------------------------------------------
@@ -422,6 +441,7 @@ def create_app(
 
     @app.route("/api/status")
     def api_status() -> tuple:
+        _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
         lock: threading.Lock = app.config["PROCESSING_LOCK"]
         busy = not lock.acquire(blocking=False)
         if not busy:
@@ -435,6 +455,7 @@ def create_app(
     @app.route("/api/upload", methods=["POST"])
     def api_upload() -> tuple:
         lock: threading.Lock = app.config["PROCESSING_LOCK"]
+        _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
 
         if not lock.acquire(blocking=False):
             return jsonify({"error": "Server is busy processing another file. Please wait."}), 429
@@ -450,6 +471,7 @@ def create_app(
     @app.route("/api/download/<token>")
     def api_download(token: str) -> tuple:
         registry: dict = app.config["DOWNLOAD_REGISTRY"]
+        _cleanup_download_registry(registry)
         entry = registry.pop(token, None)  # Atomic remove from registry
 
         if entry is None:
@@ -484,6 +506,7 @@ def _handle_upload(app: Flask) -> tuple:
 
     # Reap stale files before processing
     _cleanup_old_files(temp_dir)
+    _cleanup_download_registry(registry)
 
     # Validate upload
     if "file" not in request.files:

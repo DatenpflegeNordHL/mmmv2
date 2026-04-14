@@ -453,3 +453,64 @@ class TestOptimizedAudioProcessorEdgeCases:
 
         # Should load successfully (may convert to mono)
         assert len(audio) > 0
+
+
+class TestOptimizedAudioProcessorGuards:
+    """Tests for input guardrails in optimized processor methods."""
+
+    def test_process_in_chunks_rejects_invalid_overlap(self):
+        """chunk_overlap must be smaller than chunk_duration."""
+        processor = OptimizedAudioProcessor(use_gpu=False, use_multiprocessing=False)
+        audio = np.zeros(44100, dtype=np.float32)
+
+        with pytest.raises(ValueError, match="chunk_overlap"):
+            processor.process_in_chunks(
+                audio,
+                44100,
+                chunk_duration=1.0,
+                chunk_overlap=1.0,
+                process_func=lambda chunk, sample_rate: len(chunk),
+            )
+
+    def test_detect_watermarks_parallel_uses_picklable_worker(self, monkeypatch):
+        """Multiprocessing should use a top-level picklable worker function."""
+        qualnames = []
+
+        class FakeExecutor:
+            def __init__(self, max_workers=None):
+                self.max_workers = max_workers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def map(self, func, iterable):
+                qualnames.append(getattr(func, "__qualname__", ""))
+                items = list(iterable)
+                return [
+                    {
+                        "detected": [],
+                        "method_results": {},
+                        "confidence_scores": {},
+                        "watermark_count": 0,
+                        "overall_confidence": 0.0,
+                    }
+                    for _ in items
+                ]
+
+        monkeypatch.setattr("mmm.optimized_processor.ProcessPoolExecutor", FakeExecutor)
+
+        processor = OptimizedAudioProcessor(use_gpu=False, use_multiprocessing=True)
+        audio = np.random.randn(88200).astype(np.float32)
+        result = processor.detect_watermarks_parallel(audio, 44100, chunk_duration=1.0)
+
+        assert qualnames
+        assert "<locals>" not in qualnames[0]
+        assert result["chunk_count"] == 2
+
+    def test_optimize_librosa_performance_no_legacy_api_crash(self):
+        """Optimization helper should not rely on removed librosa APIs."""
+        processor = OptimizedAudioProcessor(use_gpu=False, use_multiprocessing=False)
+        processor.optimize_librosa_performance()

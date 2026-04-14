@@ -43,16 +43,28 @@ def aggressive_sanitize(
 
     start_time = time.time()
 
-    # Set output file if not provided
-    if not output_file:
-        output_file = input_file.with_suffix(".sanitized" + input_file.suffix)
+    # Decide output format/path up front so the extension always matches encoding.
+    normalized_format = input_file.suffix.lstrip(".").lower() or "wav"
+    if output_file:
+        requested_format = output_file.suffix.lstrip(".").lower()
+        if requested_format:
+            normalized_format = requested_format
+        output_file = output_file.with_suffix(f".{normalized_format}")
+    else:
+        output_file = input_file.with_suffix(f".sanitized.{normalized_format}")
+
+    if normalized_format not in {"wav", "mp3", "flac"}:
+        return {"success": False, "error": f"Unsupported output format: {normalized_format}"}
 
     # Phase 1: Complete metadata annihilation
     print("🔥 Phase 1: Complete metadata annihilation...")
     phase_start = time.time()
 
     # Copy file first
-    shutil.copy2(input_file, output_file)
+    try:
+        shutil.copy2(input_file, output_file)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
     # Remove metadata using mutagen
     try:
@@ -232,8 +244,44 @@ def aggressive_sanitize(
     save_start = time.time()
 
     try:
-        # Save as high-quality WAV to maximize effectiveness
-        sf.write(str(output_file), sanitized_audio, sr, format="WAV", subtype="PCM_24")
+        if normalized_format == "mp3":
+            try:
+                from pydub import AudioSegment
+            except Exception as e:
+                return {"success": False, "error": f"MP3 export requires pydub/ffmpeg: {e}"}
+
+            audio_int16 = np.clip(sanitized_audio * 32767, -32768, 32767).astype(
+                np.int16
+            )
+            channels = 1 if audio_int16.ndim == 1 else audio_int16.shape[1]
+            segment = AudioSegment(
+                audio_int16.tobytes(),
+                frame_rate=sr,
+                sample_width=2,
+                channels=channels,
+            )
+            segment.export(
+                str(output_file),
+                format="mp3",
+                bitrate="320k",
+                parameters=[
+                    "-map_metadata",
+                    "-1",
+                    "-write_xing",
+                    "0",
+                    "-id3v2_version",
+                    "0",
+                    "-write_id3v1",
+                    "0",
+                ],
+            )
+        elif normalized_format == "wav":
+            sf.write(
+                str(output_file), sanitized_audio, sr, format="WAV", subtype="PCM_24"
+            )
+        else:
+            sf.write(str(output_file), sanitized_audio, sr, format="FLAC")
+
         save_time = time.time() - save_start
         print(f"   ✅ Saved in {save_time:.2f}s")
     except Exception as e:

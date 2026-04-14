@@ -7,9 +7,11 @@ import numpy as np
 import tempfile
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 import soundfile as sf
 
 from mmm.effective_sanitizer import aggressive_sanitize
+import mmm.effective_sanitizer as effective_sanitizer_module
 
 
 class TestAggressiveSanitize:
@@ -385,3 +387,54 @@ class TestAggressiveSanitizeAudioProcessing:
             # Audio should be different after processing
             if len(input_audio) == len(output_audio):
                 assert not np.allclose(input_audio, output_audio)
+
+
+class TestAggressiveSanitizeOutputFormat:
+    """Output container/extension behavior tests."""
+
+    def setup_method(self):
+        self.test_dir = Path(tempfile.mkdtemp())
+        self.sample_rate = 22050
+        t = np.linspace(0, 0.3, int(self.sample_rate * 0.3), endpoint=False)
+        self.test_audio = 0.5 * np.sin(2 * np.pi * 440 * t).astype(np.float32)
+
+    def teardown_method(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def create_test_audio_file(self, filename: str) -> Path:
+        file_path = self.test_dir / filename
+        sf.write(str(file_path), self.test_audio, self.sample_rate)
+        return file_path
+
+    def test_respects_output_file_suffix_for_flac(self, monkeypatch):
+        """When caller requests .flac, output is encoded as FLAC."""
+        input_file = self.create_test_audio_file("format_src.wav")
+        output_file = self.test_dir / "format_out.flac"
+
+        monkeypatch.setattr(
+            effective_sanitizer_module,
+            "librosa",
+            SimpleNamespace(
+                load=lambda *_args, **_kwargs: (
+                    self.test_audio.copy(),
+                    self.sample_rate,
+                )
+            ),
+        )
+
+        result = aggressive_sanitize(input_file, output_file=output_file)
+
+        if result["success"]:
+            out_path = Path(result["output_file"])
+            assert out_path.suffix.lower() == ".flac"
+            assert sf.info(str(out_path)).format == "FLAC"
+
+    def test_rejects_unsupported_output_format(self):
+        """Fail closed on unknown output containers."""
+        input_file = self.create_test_audio_file("format_reject.wav")
+        output_file = self.test_dir / "format_out.ogg"
+
+        result = aggressive_sanitize(input_file, output_file=output_file)
+
+        assert result["success"] is False
+        assert "Unsupported output format" in result["error"]
