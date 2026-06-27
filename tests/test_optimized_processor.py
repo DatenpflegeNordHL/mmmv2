@@ -316,6 +316,31 @@ class TestDetectSpectralPatternsGpu:
         assert isinstance(result["confidence"], (int, float))
         assert result["confidence"] >= 0
 
+    def test_low_frequency_sine_is_not_detected_as_watermark(self):
+        """A clean 440 Hz tone should not trigger high-frequency detection."""
+        detector = GPUAcceleratedWatermarkDetector()
+        detector.gpu_available = False
+
+        result = detector.detect_spectral_patterns_gpu(self.test_audio, self.sample_rate)
+
+        assert result["detected"] is False
+        assert result["confidence"] == 0.0
+
+    def test_strong_high_frequency_content_is_detected(self):
+        """Strong energy above 15 kHz still trips the spectral detector."""
+        detector = GPUAcceleratedWatermarkDetector()
+        detector.gpu_available = False
+        t = np.linspace(0, self.duration, int(self.sample_rate * self.duration))
+        audio = (
+            0.5 * np.sin(2 * np.pi * 440 * t)
+            + 0.2 * np.sin(2 * np.pi * 18_000 * t)
+        ).astype(np.float32)
+
+        result = detector.detect_spectral_patterns_gpu(audio, self.sample_rate)
+
+        assert result["detected"] is True
+        assert result["confidence"] > 0
+
 
 class TestBatchProcessFiles:
     """Tests for batch_process_files method"""

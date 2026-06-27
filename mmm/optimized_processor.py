@@ -5,6 +5,7 @@ Optimized processor with CPU multi-threading and GPU acceleration
 import os
 import numpy as np
 import librosa
+import soundfile as sf
 try:
     import cupy as cp  # GPU acceleration — optional
 except ImportError:
@@ -15,6 +16,10 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import multiprocessing as mp
 import time
 from functools import partial
+
+HIGH_FREQUENCY_CUTOFF_HZ = 15_000
+HIGH_FREQUENCY_RATIO_THRESHOLD = 0.02
+MIN_AUDIO_RMS = 1e-6
 
 # Check GPU availability
 try:
@@ -63,12 +68,21 @@ class OptimizedAudioProcessor:
         """
         Load audio with optimized parameters
         """
-        # Use librosa's efficient loading
-        y, sr = librosa.load(
-            str(file_path), sr=sample_rate, mono=True, dtype=np.float32
-        )
+        try:
+            y, sr = sf.read(str(file_path), dtype="float32", always_2d=False)
+            if y.ndim > 1:
+                y = np.mean(y, axis=1)
+            if sample_rate is not None and sr != sample_rate:
+                y = librosa.resample(y, orig_sr=sr, target_sr=sample_rate)
+                sr = sample_rate
+            return np.ascontiguousarray(y, dtype=np.float32), sr
+        except (RuntimeError, OSError, ValueError):
+            # MP3 and other compressed formats may not be supported by libsndfile.
+            y, sr = librosa.load(
+                str(file_path), sr=sample_rate, mono=True, dtype=np.float32
+            )
 
-        return y, sr
+        return np.ascontiguousarray(y, dtype=np.float32), sr
 
     def process_in_chunks(
         self,
@@ -254,52 +268,139 @@ class GPUAcceleratedWatermarkDetector:
         """
         GPU-accelerated spectral pattern detection
         """
-        if not self.gpu_available:
-            # Fallback to CPU implementation
-            from .detection.watermark_detector import WatermarkDetector
+        if sample_rate <= 0:
+            return {
+                "detected": False,
+                "confidence": 0.0,
+                "details": ["Invalid sample rate"],
+            }
 
-            # detect_spread_spectrum expects (samples, channels)
-            if audio_data.ndim == 1:
-                audio_data = np.expand_dims(audio_data, axis=1)
-            detector = WatermarkDetector()
-            return detector.detect_spread_spectrum(audio_data, sample_rate)
+        if not self.gpu_available:
+            return self._detect_spectral_patterns_cpu(audio_data, sample_rate)
 
         import torch
 
         # Convert to PyTorch tensor on GPU
-        if audio_data.ndim > 1:
-            audio_data = np.mean(audio_data, axis=1)
+        audio_data = self._to_mono(audio_data)
+        if audio_data.size < 2:
+            return {
+                "detected": False,
+                "confidence": 0.0,
+                "details": ["Audio chunk too short for spectral analysis"],
+            }
+
         audio_tensor = torch.from_numpy(audio_data).float().to(self.device)
+        audio_tensor = audio_tensor - torch.mean(audio_tensor)
+        rms = torch.sqrt(torch.mean(audio_tensor * audio_tensor))
+        if float(rms.item()) < MIN_AUDIO_RMS:
+            return {
+                "detected": False,
+                "confidence": 0.0,
+                "details": ["Audio chunk is silent or near-silent"],
+            }
 
-        # GPU FFT computation
-        fft_tensor = torch.fft.fft(audio_tensor)
-        magnitude = torch.abs(fft_tensor)
+        # GPU FFT computation. A Hann window limits leakage from normal tones.
+        window = torch.hann_window(audio_tensor.shape[0], device=self.device)
+        fft_tensor = torch.fft.rfft(audio_tensor * window)
+        power = torch.abs(fft_tensor) ** 2
 
-        # Create frequency array
-        freqs = torch.fft.fftfreq(
+        freqs = torch.fft.rfftfreq(
             audio_tensor.shape[0], 1 / sample_rate, device=self.device
         )
 
-        # GPU-based high frequency analysis
-        high_freq_mask = torch.abs(freqs) > 15000
-        if bool(torch.any(high_freq_mask).item()):
-            high_freq_power = torch.mean(magnitude[high_freq_mask])
-            high_freq_power_val = float(high_freq_power.item())
+        high_freq_mask = freqs >= HIGH_FREQUENCY_CUTOFF_HZ
+        analysis_mask = freqs > 20
+        if not bool(torch.any(high_freq_mask).item()) or not bool(
+            torch.any(analysis_mask).item()
+        ):
+            return {
+                "detected": False,
+                "confidence": 0.0,
+                "details": ["No high-frequency band available at this sample rate"],
+            }
+
+        total_power = torch.sum(power[analysis_mask])
+        if float(total_power.item()) <= 0:
+            high_freq_ratio = 0.0
         else:
-            high_freq_power_val = 0.0
+            high_freq_ratio = float(
+                (torch.sum(power[high_freq_mask]) / total_power).item()
+            )
 
-        # Check for suspicious high frequency content
-        threshold = torch.median(magnitude) * 5
-        threshold_val = float(threshold.item()) if threshold.numel() else 0.0
-        suspicious = threshold_val > 0 and high_freq_power_val > threshold_val
-
-        raw_confidence = (
-            high_freq_power_val / threshold_val if threshold_val > 0 else 0.0
-        )
+        detected = high_freq_ratio >= HIGH_FREQUENCY_RATIO_THRESHOLD
+        confidence = self._confidence_from_ratio(high_freq_ratio)
         return {
-            "detected": bool(suspicious),
-            "confidence": max(0.0, min(1.0, raw_confidence)),
-            "details": ["GPU-accelerated spectral analysis"],
+            "detected": detected,
+            "confidence": confidence,
+            "details": [
+                "GPU-accelerated spectral analysis",
+                f"High-frequency energy ratio: {high_freq_ratio:.4f}",
+            ],
+        }
+
+    @staticmethod
+    def _to_mono(audio_data: np.ndarray) -> np.ndarray:
+        audio_data = np.asarray(audio_data, dtype=np.float32)
+        if audio_data.ndim > 1:
+            audio_data = np.mean(audio_data, axis=1)
+        return np.ascontiguousarray(audio_data.reshape(-1), dtype=np.float32)
+
+    @staticmethod
+    def _confidence_from_ratio(high_freq_ratio: float) -> float:
+        if high_freq_ratio <= HIGH_FREQUENCY_RATIO_THRESHOLD:
+            return 0.0
+        scaled = (high_freq_ratio - HIGH_FREQUENCY_RATIO_THRESHOLD) / (
+            0.25 - HIGH_FREQUENCY_RATIO_THRESHOLD
+        )
+        return max(0.0, min(1.0, scaled))
+
+    def _detect_spectral_patterns_cpu(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
+        audio_data = self._to_mono(audio_data)
+        if audio_data.size < 2:
+            return {
+                "detected": False,
+                "confidence": 0.0,
+                "details": ["Audio chunk too short for spectral analysis"],
+            }
+
+        centered = audio_data - float(np.mean(audio_data))
+        rms = float(np.sqrt(np.mean(centered * centered)))
+        if rms < MIN_AUDIO_RMS:
+            return {
+                "detected": False,
+                "confidence": 0.0,
+                "details": ["Audio chunk is silent or near-silent"],
+            }
+
+        windowed = centered * np.hanning(centered.size)
+        power = np.abs(np.fft.rfft(windowed)) ** 2
+        freqs = np.fft.rfftfreq(centered.size, 1 / sample_rate)
+
+        high_freq_mask = freqs >= HIGH_FREQUENCY_CUTOFF_HZ
+        analysis_mask = freqs > 20
+        if not high_freq_mask.any() or not analysis_mask.any():
+            return {
+                "detected": False,
+                "confidence": 0.0,
+                "details": ["No high-frequency band available at this sample rate"],
+            }
+
+        total_power = float(np.sum(power[analysis_mask]))
+        high_freq_ratio = (
+            float(np.sum(power[high_freq_mask])) / total_power
+            if total_power > 0
+            else 0.0
+        )
+        detected = high_freq_ratio >= HIGH_FREQUENCY_RATIO_THRESHOLD
+        return {
+            "detected": detected,
+            "confidence": self._confidence_from_ratio(high_freq_ratio),
+            "details": [
+                "CPU spectral analysis",
+                f"High-frequency energy ratio: {high_freq_ratio:.4f}",
+            ],
         }
 
     def batch_process_files(
