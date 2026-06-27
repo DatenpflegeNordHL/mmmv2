@@ -6,8 +6,10 @@ The audio anonymizer that makes AI detectors cry
 
 import click
 import sys
-import os
+import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Optional
 
 from .ui.console import ConsoleManager
 from .ui.banners import BannerManager
@@ -16,7 +18,67 @@ from .config.config_manager import ConfigManager
 
 console = ConsoleManager()
 banner = BannerManager()
-config = ConfigManager()
+
+
+def _create_backup_for_file(file_path: Path) -> Path:
+    """Create the same backup path AudioSanitizer uses."""
+    backup_path = file_path.with_suffix(f".backup{file_path.suffix}")
+    shutil.copy2(file_path, backup_path)
+    return backup_path
+
+
+def _process_massacre_file(
+    file_path: Path,
+    output_dir: Optional[Path],
+    paranoid: bool,
+    backup: bool,
+    turbo: bool,
+) -> dict:
+    """Process one file for the massacre command."""
+    output_file = output_dir / file_path.name if output_dir else None
+
+    if backup:
+        _create_backup_for_file(file_path)
+
+    if turbo:
+        try:
+            from .turbo_analysis import turbo_analysis as _turbo_analysis
+            from .preserving_sanitizer import preserving_sanitize
+
+            analysis_results = _turbo_analysis(file_path)
+            threat_count = analysis_results.get("total_threats", 0)
+            result = preserving_sanitize(
+                file_path,
+                output_file,
+                paranoid,
+                threat_count,
+            )
+            result["mode"] = "turbo"
+            return result
+        except Exception as e:
+            fallback_error = str(e)
+            config_manager = ConfigManager()
+            sanitizer = AudioSanitizer(
+                input_file=file_path,
+                output_file=output_file,
+                paranoid_mode=paranoid,
+                config=config_manager.config,
+            )
+            result = sanitizer.sanitize_audio()
+            result["mode"] = "fallback"
+            result["fallback_error"] = fallback_error
+            return result
+
+    config_manager = ConfigManager()
+    sanitizer = AudioSanitizer(
+        input_file=file_path,
+        output_file=output_file,
+        paranoid_mode=paranoid,
+        config=config_manager.config,
+    )
+    result = sanitizer.sanitize_audio()
+    result["mode"] = "regular"
+    return result
 
 
 @click.group()
@@ -423,7 +485,13 @@ def obliterate(
 @click.option(
     "--paranoid", is_flag=True, default=False, help="Maximum destruction mode"
 )
-@click.option("--workers", "-w", type=int, default=4, help="Number of parallel workers")
+@click.option(
+    "--workers",
+    "-w",
+    type=click.IntRange(1, 32),
+    default=4,
+    help="Number of parallel workers",
+)
 @click.option(
     "--backup", is_flag=True, default=False, help="Create backups of original files"
 )
@@ -453,6 +521,7 @@ def massacre(ctx, directory, output_dir, extension, paranoid, workers, backup, t
     for ext in extension:
         files.extend(directory.glob(f"*.{ext.lower()}"))
         files.extend(directory.glob(f"*.{ext.upper()}"))
+    files = sorted(set(files))
 
     if not files:
         console.warning("📂 No audio files found in directory")
@@ -463,73 +532,68 @@ def massacre(ctx, directory, output_dir, extension, paranoid, workers, backup, t
     if turbo:
         console.info("🚀 TURBO MODE enabled for massacre")
 
+    if output_dir:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    workers = min(max(1, workers), len(files), 32)
     console.info("🔄 Processing files...")
-    for file_path in files:
-        try:
-            output_file = output_dir / file_path.name if output_dir else None
+
+    failures = 0
+
+    def report_result(file_path: Path, result: dict):
+        nonlocal failures
+        mode = result.get("mode", "regular")
+        if mode == "fallback":
+            console.warning(
+                f"   ⚠️ Turbo failed for {file_path.name}, "
+                f"fell back: {result.get('fallback_error', 'unknown error')}"
+            )
+
+        if result.get("success"):
+            console.success(f"   ✅ {file_path.name} - Sanitized ({mode})!")
+        else:
+            failures += 1
+            console.error(
+                f"   ❌ {file_path.name} - Failed: "
+                f"{result.get('error', 'Unknown error')}"
+            )
+
+    if workers == 1:
+        for file_path in files:
             console.info(f"   Processing: {file_path.name}")
-
-            if turbo:
-                # Use turbo path: turbo_analysis + preserving_sanitize
-                try:
-                    from .turbo_analysis import turbo_analysis as _turbo_analysis
-                    from .preserving_sanitizer import preserving_sanitize
-
-                    analysis_results = _turbo_analysis(file_path)
-                    threat_count = analysis_results.get("total_threats", 0)
-
-                    preserving_result = preserving_sanitize(
-                        file_path,
-                        output_file,
-                        paranoid,
-                        threat_count,
-                    )
-
-                    if preserving_result["success"]:
-                        console.success(f"   ✅ {file_path.name} - Sanitized (turbo)!")
-                    else:
-                        console.error(f"   ❌ {file_path.name} - Failed!")
-                except Exception as e:
-                    console.warning(
-                        f"   ⚠️ Turbo failed for {file_path.name}, falling back: {e}"
-                    )
-                    # Fall back to regular sanitization
-                    config_manager = ConfigManager()
-                    sanitizer = AudioSanitizer(
-                        input_file=file_path,
-                        output_file=output_file,
-                        paranoid_mode=paranoid,
-                        config=config_manager.config,
-                    )
-                    if backup:
-                        sanitizer.create_backup()
-                    result = sanitizer.sanitize_audio()
-                    if result["success"]:
-                        console.success(f"   ✅ {file_path.name} - Sanitized (fallback)!")
-                    else:
-                        console.error(f"   ❌ {file_path.name} - Failed!")
-            else:
-                # Regular (non-turbo) path
-                config_manager = ConfigManager()
-                sanitizer = AudioSanitizer(
-                    input_file=file_path,
-                    output_file=output_file,
-                    paranoid_mode=paranoid,
-                    config=config_manager.config,
+            try:
+                result = _process_massacre_file(
+                    file_path, output_dir, paranoid, backup, turbo
                 )
+                report_result(file_path, result)
+            except Exception as e:
+                failures += 1
+                console.error(f"   💥 {file_path.name} - Error: {str(e)}")
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_file = {
+                executor.submit(
+                    _process_massacre_file,
+                    file_path,
+                    output_dir,
+                    paranoid,
+                    backup,
+                    turbo,
+                ): file_path
+                for file_path in files
+            }
 
-                if backup:
-                    sanitizer.create_backup()
+            for future in as_completed(future_to_file):
+                file_path = future_to_file[future]
+                try:
+                    report_result(file_path, future.result())
+                except Exception as e:
+                    failures += 1
+                    console.error(f"   💥 {file_path.name} - Error: {str(e)}")
 
-                result = sanitizer.sanitize_audio()
-
-                if result["success"]:
-                    console.success(f"   ✅ {file_path.name} - Sanitized!")
-                else:
-                    console.error(f"   ❌ {file_path.name} - Failed!")
-
-        except Exception as e:
-            console.error(f"   💥 {file_path.name} - Error: {str(e)}")
+    if failures:
+        console.error(f"💥 Massacre completed with {failures} failure(s)")
+        sys.exit(1)
 
     console.success("🎉 Massacre complete! The audio has been liberated!")
 

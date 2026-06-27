@@ -5,6 +5,8 @@ PRESERVING Sanitizer - Removes threats while keeping audio playable
 """
 
 import os
+import contextlib
+import io
 import logging
 import librosa
 import numpy as np
@@ -60,6 +62,7 @@ def preserving_sanitize(
     onset_velocity=True,
     mfcc_perturb=True,
     seed=None,
+    verbose=True,
 ):
     """
     Audio sanitization that PRESERVES audio quality while removing threats
@@ -72,13 +75,49 @@ def preserving_sanitize(
     Returns:
         Dict containing sanitization results
     """
+    if not verbose:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return preserving_sanitize(
+                input_file=input_file,
+                output_file=output_file,
+                paranoid_mode=paranoid_mode,
+                threat_count=threat_count,
+                output_format=output_format,
+                phase_dither=phase_dither,
+                comb_mask=comb_mask,
+                transient_shift=transient_shift,
+                resample_nudge=resample_nudge,
+                gated_resample_nudge=gated_resample_nudge,
+                phase_noise=phase_noise,
+                phase_swirl=phase_swirl,
+                masked_hf_phase=masked_hf_phase,
+                micro_eq_flutter=micro_eq_flutter,
+                hf_decorrelate=hf_decorrelate,
+                refined_transient=refined_transient,
+                adaptive_transient=adaptive_transient,
+                spectral_clean=spectral_clean,
+                fingerprint_remove=fingerprint_remove,
+                tempo_drift=tempo_drift,
+                onset_velocity=onset_velocity,
+                mfcc_perturb=mfcc_perturb,
+                seed=seed,
+                verbose=True,
+            )
+
     _configure_thread_counts()
+
+    input_file = Path(input_file)
+    output_file = Path(output_file) if output_file is not None else None
 
     if seed is not None:
         np.random.seed(seed)
 
     print(f"🎵 PRESERVING SANITIZATION - Keeping audio alive!")
     print(f"   Input: {input_file}")
+
+    if not input_file.exists():
+        return {"success": False, "error": f"Input file not found: {input_file}"}
+
     # Decide output format and path up front so we don't dump WAV data into an MP3 filename
     normalized_format = (output_format or "").lower().lstrip(".")
     if normalized_format in ("", "preserve"):
@@ -103,6 +142,7 @@ def preserving_sanitize(
     phase_start = time.time()
 
     # Copy file first
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(input_file, output_file)
 
     # Remove metadata using mutagen
@@ -1482,7 +1522,10 @@ def main():
     if result["success"]:
         print(f"\n✨ Preserving sanitization complete!")
         print(f"   Audio quality: PRESERVED")
-        print(f"   Effectiveness: {result['stats']['effectiveness']:.1f}%")
+        if "effectiveness" in result["stats"]:
+            print(f"   Effectiveness: {result['stats']['effectiveness']:.1f}%")
+        else:
+            print(f"   Processing speed: {result['stats'].get('processing_speed', 'N/A')}")
     else:
         print(
             f"\n💥 Preserving sanitization failed: {result.get('error', 'Unknown error')}"

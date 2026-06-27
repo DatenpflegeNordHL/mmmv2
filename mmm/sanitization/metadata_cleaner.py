@@ -228,7 +228,10 @@ class MetadataCleaner:
         try:
             # Method 1: Clean with mutagen
             try:
-                wav_file = WAVE(input_file)
+                # Mutagen saves changes to the path it opened, so operate on
+                # a copy to keep the source file strictly read-only.
+                shutil.copy2(input_file, output_file)
+                wav_file = WAVE(output_file)
 
                 if wav_file.tags:
                     tags_count = len(wav_file.tags)
@@ -372,14 +375,9 @@ class MetadataCleaner:
 
         except Exception as e:
             result["errors"].append(f"Generic cleaning failed: {str(e)}")
-
-            # Fallback: simple copy if all else fails
-            try:
-                shutil.copy2(input_file, output_file)
-                result["methods_used"].append("copy_fallback")
-                result["success"] = True
-            except Exception as e2:
-                result["errors"].append(f"Copy fallback failed: {str(e2)}")
+            result["errors"].append(
+                "Refusing copy fallback because it may preserve metadata"
+            )
 
         return result
 
@@ -394,14 +392,18 @@ class MetadataCleaner:
             with open(file_path, "rb") as f:
                 header = f.read(10)
                 has_id3v2 = header[:3] == b"ID3"
-                # ID3v1 tag is at the end of the file
-                f.seek(-128, 2)
-                footer = f.read(3)
-                has_id3v1 = footer == b"TAG"
+                has_id3v1 = False
+                # ID3v1 tag is at the end of files large enough to contain it.
+                if file_path.stat().st_size >= 128:
+                    f.seek(-128, 2)
+                    footer = f.read(3)
+                    has_id3v1 = footer == b"TAG"
                 return has_id3v2 or has_id3v1
 
         except Exception:
-            return False
+            # Fail closed: if metadata verification cannot read the file,
+            # assume metadata may still be present.
+            return True
 
     def strip_all_binary_metadata(self, file_data: bytes) -> bytes:
         """

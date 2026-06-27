@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from flask import Flask, request, jsonify, send_file, Response
+from mutagen import File as MutagenFile
 from werkzeug.utils import secure_filename
 
 # ---------------------------------------------------------------------------
@@ -370,6 +371,24 @@ def _validate_extension(filename: str) -> bool:
     return ext in ALLOWED_EXTENSIONS
 
 
+def _validate_audio_content(file_path: Path) -> bool:
+    """Validate that the saved upload is readable as an audio file."""
+    try:
+        audio_file = MutagenFile(file_path)
+        if audio_file is not None and getattr(audio_file, "info", None) is not None:
+            return True
+    except Exception:
+        pass
+
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(file_path))
+        return bool(info.samplerate and info.frames >= 0)
+    except Exception:
+        return False
+
+
 def _cleanup_old_files(directory: Path, max_age: int = DEFAULT_STALE_AGE) -> None:
     """Remove files older than *max_age* seconds from *directory*."""
     now = time.time()
@@ -424,6 +443,7 @@ def create_app(
 
     # Download registry: token -> {"path": Path, "filename": str, "created": float}
     app.config["DOWNLOAD_REGISTRY"]: Dict[str, Dict[str, Any]] = {}
+    app.config["DOWNLOAD_REGISTRY_LOCK"] = threading.Lock()
 
     max_size_mb = max_file_size // (1024 * 1024)
 
@@ -441,7 +461,8 @@ def create_app(
 
     @app.route("/api/status")
     def api_status() -> tuple:
-        _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
+        with app.config["DOWNLOAD_REGISTRY_LOCK"]:
+            _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
         lock: threading.Lock = app.config["PROCESSING_LOCK"]
         busy = not lock.acquire(blocking=False)
         if not busy:
@@ -455,7 +476,8 @@ def create_app(
     @app.route("/api/upload", methods=["POST"])
     def api_upload() -> tuple:
         lock: threading.Lock = app.config["PROCESSING_LOCK"]
-        _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
+        with app.config["DOWNLOAD_REGISTRY_LOCK"]:
+            _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
 
         if not lock.acquire(blocking=False):
             return jsonify({"error": "Server is busy processing another file. Please wait."}), 429
@@ -471,8 +493,9 @@ def create_app(
     @app.route("/api/download/<token>")
     def api_download(token: str) -> tuple:
         registry: dict = app.config["DOWNLOAD_REGISTRY"]
-        _cleanup_download_registry(registry)
-        entry = registry.pop(token, None)  # Atomic remove from registry
+        with app.config["DOWNLOAD_REGISTRY_LOCK"]:
+            _cleanup_download_registry(registry)
+            entry = registry.pop(token, None)
 
         if entry is None:
             return jsonify({"error": "File not found or expired."}), 404
@@ -506,7 +529,8 @@ def _handle_upload(app: Flask) -> tuple:
 
     # Reap stale files before processing
     _cleanup_old_files(temp_dir)
-    _cleanup_download_registry(registry)
+    with app.config["DOWNLOAD_REGISTRY_LOCK"]:
+        _cleanup_download_registry(registry)
 
     # Validate upload
     if "file" not in request.files:
@@ -532,6 +556,10 @@ def _handle_upload(app: Flask) -> tuple:
     input_path = temp_dir / unique_name
     f.save(str(input_path))
 
+    if not _validate_audio_content(input_path):
+        input_path.unlink(missing_ok=True)
+        return jsonify({"error": "Invalid or unsupported audio file."}), 400
+
     try:
         # Import preserving sanitizer (deferred to avoid import overhead)
         from .preserving_sanitizer import preserving_sanitize
@@ -543,6 +571,7 @@ def _handle_upload(app: Flask) -> tuple:
             paranoid_mode=paranoid,
             threat_count=0,
             output_format=fmt,
+            verbose=False,
         )
 
         if not result.get("success"):
@@ -560,11 +589,12 @@ def _handle_upload(app: Flask) -> tuple:
         ext = output_path.suffix
         download_name = f"{stem}_clean{ext}"
 
-        registry[token] = {
-            "path": str(output_path),
-            "filename": download_name,
-            "created": time.time(),
-        }
+        with app.config["DOWNLOAD_REGISTRY_LOCK"]:
+            registry[token] = {
+                "path": str(output_path),
+                "filename": download_name,
+                "created": time.time(),
+            }
 
         return jsonify({
             "success": True,

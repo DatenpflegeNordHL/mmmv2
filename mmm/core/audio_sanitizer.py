@@ -5,6 +5,7 @@ Core AudioSanitizer class - Main audio processing engine
 import os
 import shutil
 import hashlib
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -83,7 +84,7 @@ class AudioSanitizer:
         try:
             # Try librosa first (best for analysis)
             self.audio_data, self.sample_rate = librosa.load(
-                str(self.input_file), sr=None, mono=True  # Load as mono for consistency
+                str(self.input_file), sr=None, mono=False
             )
             self.audio_data = self._ensure_channel_layout(self.audio_data)
 
@@ -101,8 +102,8 @@ class AudioSanitizer:
 
                 # Convert to numpy array
                 samples = np.array(audio.get_array_of_samples())
-                if audio.channels == 2:
-                    samples = samples.reshape((-1, 2))
+                if audio.channels > 1:
+                    samples = samples.reshape((-1, audio.channels))
 
                 self.audio_data = samples.astype(np.float32) / 32768.0
                 self.audio_data = self._ensure_channel_layout(self.audio_data)
@@ -128,6 +129,13 @@ class AudioSanitizer:
         """
         if not self.load_audio():
             raise Exception("Failed to load audio file")
+
+        return self._analyze_loaded_audio(deep=deep)
+
+    def _analyze_loaded_audio(self, deep: bool = False) -> Dict[str, Any]:
+        """Analyze the currently loaded audio without decoding the file again."""
+        if self.audio_data is None or self.sample_rate is None:
+            raise RuntimeError("Audio must be loaded before analysis")
 
         analysis = {
             "file_info": {
@@ -182,6 +190,15 @@ class AudioSanitizer:
         )
 
         return analysis
+
+    def _count_metadata_findings(self, analysis: Dict[str, Any]) -> int:
+        """Count metadata items expected to be removed by final clean export."""
+        metadata = analysis.get("metadata", {})
+        return (
+            len(metadata.get("tags", []))
+            + len(metadata.get("suspicious_chunks", []))
+            + len(metadata.get("hidden_data", []))
+        )
 
     def _calculate_threat_level(self, analysis: Dict[str, Any]) -> str:
         """
@@ -243,31 +260,18 @@ class AudioSanitizer:
                     "or in an unsupported format"
                 )
 
-            analysis = self.analyze_file(deep=True)
+            analysis = self._analyze_loaded_audio(deep=True)
 
             # Initialize sanitized data
             sanitized_audio = self.audio_data.copy()
 
-            # Phase 1: Metadata removal
-            self._info("Phase 1: Metadata annihilation...")
-            metadata_result = self.metadata_cleaner.clean_file(
-                self.input_file, self.output_file
+            # Phase 1: Metadata removal is performed by final clean export.
+            # Do not write/reload an intermediate output that later phases
+            # overwrite; keep the source decode as the single DSP input.
+            self._info("Phase 1: Metadata scheduled for clean final export...")
+            self.processing_stats["metadata_removed"] = self._count_metadata_findings(
+                analysis
             )
-            if not metadata_result.get("success", True):
-                self._info(
-                    f"Metadata cleaning reported issues: "
-                    f"{metadata_result.get('errors', [])}"
-                )
-            self.processing_stats["metadata_removed"] = metadata_result.get(
-                "tags_removed", 0
-            )
-
-            # Reload clean audio for further processing
-            if self.output_file.exists():
-                sanitized_audio, self.sample_rate = librosa.load(
-                    str(self.output_file), sr=None, mono=False
-                )
-                sanitized_audio = self._ensure_channel_layout(sanitized_audio)
 
             # Phase 2: Spectral watermark removal
             self._info("Phase 2: Spectral watermark elimination...")
@@ -296,8 +300,30 @@ class AudioSanitizer:
                 for i in range(3):
                     sanitized_audio = self._paranoid_pass(sanitized_audio)
 
-            # Save final result
-            self._save_audio(sanitized_audio)
+            # Save processed audio to a same-format temp file, then run the
+            # metadata cleaner into the final destination and verify it.
+            temp_output = self._temporary_output_file()
+            try:
+                self._save_audio(sanitized_audio, output_file=temp_output)
+                metadata_result = self.metadata_cleaner.clean_file(
+                    temp_output, self.output_file
+                )
+                if not metadata_result.get("success", False):
+                    raise RuntimeError(
+                        "Metadata cleaning failed after audio export: "
+                        + "; ".join(metadata_result.get("errors", []))
+                    )
+                if self.metadata_cleaner._verify_metadata_present(self.output_file):
+                    raise RuntimeError(
+                        "Metadata verification failed after final export"
+                    )
+                self.processing_stats["metadata_removed"] = max(
+                    self.processing_stats["metadata_removed"],
+                    metadata_result.get("tags_removed", 0)
+                    + metadata_result.get("chunks_removed", 0),
+                )
+            finally:
+                temp_output.unlink(missing_ok=True)
 
             # Calculate quality metrics
             self.processing_stats["quality_loss"] = self._calculate_quality_loss()
@@ -355,10 +381,13 @@ class AudioSanitizer:
 
         return result + noise
 
-    def _save_audio(self, audio_data: np.ndarray):
+    def _save_audio(self, audio_data: np.ndarray, output_file: Optional[Path] = None):
         """Save processed audio to output file"""
         if self.sample_rate is None:
             raise ValueError("Sample rate is not set; cannot save audio")
+
+        target_file = output_file or self.output_file
+        target_file.parent.mkdir(parents=True, exist_ok=True)
 
         audio_data = np.real(self._ensure_channel_layout(audio_data))
         if audio_data.ndim == 1:
@@ -383,7 +412,7 @@ class AudioSanitizer:
                 channels=channels,
             )
             segment.export(
-                str(self.output_file),
+                str(target_file),
                 format="mp3",
                 bitrate="320k",
                 parameters=[
@@ -399,11 +428,17 @@ class AudioSanitizer:
             )
         else:
             sf.write(
-                str(self.output_file),
+                str(target_file),
                 audio_int16,
                 self.sample_rate,
                 format=target_format.upper(),
             )
+
+    def _temporary_output_file(self) -> Path:
+        """Return a unique same-format temp output path beside the final file."""
+        return self.output_file.with_name(
+            f".{self.output_file.stem}.{uuid.uuid4().hex}.tmp{self.output_file.suffix}"
+        )
 
     def _calculate_quality_loss(self) -> float:
         """Calculate percentage of quality loss during processing"""
@@ -430,7 +465,8 @@ class AudioSanitizer:
             else:
                 return 0.0
 
-        except Exception:
+        except Exception as e:
+            self.processing_stats["quality_loss_error"] = str(e)
             return 0.0
 
     def _calculate_file_hash(self, file_path: Path) -> str:

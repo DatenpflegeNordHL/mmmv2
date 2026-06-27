@@ -4,6 +4,7 @@ Configuration manager for MMM settings and preferences
 
 import os
 import yaml
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any, Optional
 from .defaults import DEFAULT_CONFIG
@@ -17,7 +18,7 @@ class ConfigManager:
     def __init__(self, config_file: Optional[Path] = None):
         self.config_dir = self._get_config_dir()
         self.config_file = config_file or self.config_dir / "config.yaml"
-        self.config = DEFAULT_CONFIG.copy()
+        self.config = deepcopy(DEFAULT_CONFIG)
 
         # Load existing config if present
         self.load_config()
@@ -44,20 +45,20 @@ class ConfigManager:
 
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file"""
-        try:
-            if self.config_file.exists():
-                with open(self.config_file, "r") as f:
-                    user_config = yaml.safe_load(f)
+        if self.config_file.exists():
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                user_config = yaml.safe_load(f) or {}
 
-                # Merge with defaults
-                self.config = self._merge_configs(DEFAULT_CONFIG, user_config)
-            else:
-                # Create default config file
-                self.save_config()
+            if not isinstance(user_config, dict):
+                raise ValueError(
+                    f"Config file must contain a YAML mapping: {self.config_file}"
+                )
 
-        except Exception as e:
-            print(f"Warning: Failed to load config file: {e}")
-            self.config = DEFAULT_CONFIG.copy()
+            # Merge with defaults
+            self.config = self._merge_configs(DEFAULT_CONFIG, user_config)
+        else:
+            # Create default config file
+            self.save_config()
 
         return self.config
 
@@ -65,14 +66,14 @@ class ConfigManager:
         """Save current configuration to file"""
         try:
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_file, "w") as f:
+            with open(self.config_file, "w", encoding="utf-8") as f:
                 yaml.dump(self.config, f, default_flow_style=False, indent=2)
         except Exception as e:
             print(f"Warning: Failed to save config file: {e}")
 
     def get_config(self) -> Dict[str, Any]:
         """Get current configuration"""
-        return self.config.copy()
+        return deepcopy(self.config)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get specific configuration value using dot notation"""
@@ -102,14 +103,14 @@ class ConfigManager:
 
     def reset_to_defaults(self):
         """Reset configuration to defaults"""
-        self.config = DEFAULT_CONFIG.copy()
+        self.config = deepcopy(DEFAULT_CONFIG)
         self.save_config()
 
     def _merge_configs(
         self, default: Dict[str, Any], user: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Recursively merge user config with defaults"""
-        result = default.copy()
+        result = deepcopy(default)
 
         for key, value in user.items():
             if (
@@ -256,8 +257,11 @@ class ConfigManager:
     def import_config(self, file_path: Path, merge: bool = True):
         """Import configuration from file"""
         try:
-            with open(file_path, "r") as f:
-                imported_config = yaml.safe_load(f)
+            with open(file_path, "r", encoding="utf-8") as f:
+                imported_config = yaml.safe_load(f) or {}
+
+            if not isinstance(imported_config, dict):
+                raise ValueError("Imported config must contain a YAML mapping")
 
             if merge:
                 self.config = self._merge_configs(self.config, imported_config)

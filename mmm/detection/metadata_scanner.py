@@ -4,6 +4,7 @@ Metadata scanner for deep forensic analysis of audio file metadata
 
 import struct
 import binascii
+import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from mutagen import File as MutagenFile
@@ -232,26 +233,28 @@ class MetadataScanner:
 
     def _is_tag_suspicious(self, key: str, value: str) -> bool:
         """Check if a metadata tag is suspicious"""
-        suspicious_indicators = [
-            "ai",
-            "generated",
-            "synthetic",
-            "watermark",
-            "fingerprint",
-            "identifier",
-            "trace",
-            "uuid",
-            "hash",
-            "signature",
-            "auth",
-            "verify",
+        suspicious_patterns = [
+            r"\bai\b",
+            r"openai",
+            r"generated",
+            r"synthetic",
+            r"watermark",
+            r"fingerprint",
+            r"identifier",
+            r"\btrace\b",
+            r"\buuid\b",
+            r"\bhash\b",
+            r"signature",
+            r"\bauth(?:entication)?\b",
+            r"\bverif(?:y|ication)\b",
         ]
 
         key_lower = key.lower()
         value_lower = value.lower()
+        combined = f"{key_lower} {value_lower}"
 
-        for indicator in suspicious_indicators:
-            if indicator in key_lower or indicator in value_lower:
+        for pattern in suspicious_patterns:
+            if re.search(pattern, combined):
                 return True
 
         # Check for very long tag values (might contain hidden data)

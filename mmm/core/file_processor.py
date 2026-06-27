@@ -291,10 +291,16 @@ class FileProcessor:
         except (KeyError, ValueError):
             output_name = f"{name}_clean{ext}"
 
-        # Prevent path traversal
-        output_path = (output_dir / output_name).resolve()
-        if not str(output_path).startswith(str(output_dir.resolve())):
-            raise ValueError("Output naming pattern produces path outside output directory")
+        # Prevent path traversal. String prefix checks are unsafe here:
+        # "/tmp/output_evil" starts with "/tmp/output" but is not inside it.
+        resolved_output_dir = output_dir.resolve()
+        output_path = (resolved_output_dir / output_name).resolve()
+        try:
+            output_path.relative_to(resolved_output_dir)
+        except ValueError:
+            raise ValueError(
+                "Output naming pattern produces path outside output directory"
+            )
 
         return output_path
 

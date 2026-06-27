@@ -4,6 +4,8 @@ Turbo Analysis - GPU + Multi-core CPU optimization
 """
 
 import os
+import contextlib
+import io
 import librosa
 import numpy as np
 from pathlib import Path
@@ -81,10 +83,26 @@ def _is_gpu_available() -> bool:
         return False
 
 
-def turbo_analysis(file_path, chunk_duration=5.0):
+def turbo_analysis(file_path, chunk_duration=5.0, verbose=True):
     """
     Turbo-charged analysis using GPU + Multi-core CPU
     """
+    file_path = Path(file_path)
+    try:
+        chunk_duration = float(chunk_duration)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("chunk_duration must be a positive number") from exc
+    if not np.isfinite(chunk_duration) or chunk_duration <= 0:
+        raise ValueError("chunk_duration must be greater than 0")
+
+    if not verbose:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return turbo_analysis(
+                file_path=file_path,
+                chunk_duration=chunk_duration,
+                verbose=True,
+            )
+
     gpu_name = _detect_gpu_name()
     print(f"🚀 TURBO ANALYSIS - GPU + Multi-Core CPU")
     print(f"   GPU: {gpu_name}")
@@ -105,7 +123,7 @@ def turbo_analysis(file_path, chunk_duration=5.0):
     load_time = time.time() - start_time
 
     total_duration = len(audio) / sr
-    chunk_samples = int(chunk_duration * sr)
+    chunk_samples = max(1, int(chunk_duration * sr))
     num_chunks = int(np.ceil(len(audio) / chunk_samples))
 
     print(f"   ✅ Loaded in {load_time:.2f}s")

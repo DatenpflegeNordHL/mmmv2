@@ -125,7 +125,13 @@ class OptimizedAudioProcessor:
         from .detection.watermark_detector import WatermarkDetector
 
         detector = WatermarkDetector()
-        chunk_samples = int(chunk_duration * sample_rate)
+        try:
+            chunk_duration = float(chunk_duration)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("chunk_duration must be a positive number") from exc
+        if not np.isfinite(chunk_duration) or chunk_duration <= 0:
+            raise ValueError("chunk_duration must be greater than 0")
+        chunk_samples = max(1, int(chunk_duration * sample_rate))
 
         # Create chunks
         chunks = []
