@@ -170,15 +170,15 @@ Browser-based drag-and-drop interface
 mmm server                              # Start on localhost:8778
 mmm server --port 9000                  # Custom port
 mmm server --host 0.0.0.0              # Network-accessible (warns)
-mmm server --max-size 1000             # 1 GB upload limit
+mmm server --max-size 95               # Cloudflare-safe upload limit
 
 Options:
   --host TEXT         Bind address  [default: 127.0.0.1]
   --port INTEGER      Listen port  [default: 8778]
-  --max-size INTEGER  Max upload in MB  [default: 500]
+  --max-size INTEGER  Max upload in MB  [default: 95]
 ```
 
-Open `http://127.0.0.1:8778` in your browser to drag-and-drop audio files for sanitization. Supports MP3, WAV, and FLAC. Processing uses the turbo/preserving sanitizer path with optional paranoid mode.
+Open `http://127.0.0.1:8778` in your browser to drag-and-drop audio files for sanitization. Supports MP3, WAV, and FLAC. Processing runs as a background job and uses the CUDA web sanitizer first when a compatible NVIDIA GPU is available, with a safe CPU preserving fallback.
 
 ### `config`
 Configuration management

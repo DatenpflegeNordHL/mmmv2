@@ -12,18 +12,20 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from flask import Flask, request, jsonify, send_file, Response
 from mutagen import File as MutagenFile
 from werkzeug.utils import secure_filename
+
+from .gpu_web_sanitizer import cuda_available, gpu_web_sanitize
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 ALLOWED_EXTENSIONS: frozenset[str] = frozenset({"mp3", "wav", "flac"})
-DEFAULT_MAX_FILE_SIZE: int = 500 * 1024 * 1024  # 500 MB
+DEFAULT_MAX_FILE_SIZE: int = 95 * 1024 * 1024  # Cloudflare-safe default
 DEFAULT_STALE_AGE: int = 3600  # 1 hour
 
 # ---------------------------------------------------------------------------
@@ -195,12 +197,14 @@ JS_APP = """\
       }
     });
     xhr.addEventListener('load', () => {
-      if (xhr.status === 200) {
+      if (xhr.status === 202) {
         const data = JSON.parse(xhr.responseText);
-        if (data.success) {
-          showResult(data);
+        if (data.job_id) {
+          $('statusText').textContent = data.message || 'GPU job queued...';
+          $('progressFill').style.width = '25%';
+          pollJob(data.job_id);
         } else {
-          showError(data.error || 'Sanitization failed.');
+          showError(data.error || 'Unable to start processing job.');
         }
       } else if (xhr.status === 429) {
         showError('Server is busy processing another file. Please wait and try again.');
@@ -209,28 +213,48 @@ JS_APP = """\
         try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
         showError(msg);
       }
-      $('processBtn').disabled = false;
     });
     xhr.addEventListener('error', () => {
       showError('Network error. Is the server still running?');
       $('processBtn').disabled = false;
     });
 
+    xhr.upload.addEventListener('loadend', () => {
+      $('statusText').textContent = 'Upload complete. Starting GPU processing...';
+      $('progressFill').style.width = '25%';
+    });
+
     // Start upload
     xhr.open('POST', '/api/upload');
     xhr.send(formData);
+  }
 
-    // Simulate processing progress after upload completes
-    xhr.upload.addEventListener('loadend', () => {
-      $('statusText').textContent = 'Processing audio...';
-      $('progressFill').style.width = '50%';
-      let p = 50;
-      const iv = setInterval(() => {
-        if (p < 95) { p += Math.random() * 3; $('progressFill').style.width = Math.min(p, 95) + '%'; }
-      }, 500);
-      const origLoad = xhr.onload;
-      xhr.addEventListener('loadend', () => { clearInterval(iv); $('progressFill').style.width = '100%'; });
-    });
+  function pollJob(jobId) {
+    const poll = () => {
+      fetch('/api/job/' + encodeURIComponent(jobId), {cache:'no-store'})
+        .then(resp => resp.json().then(data => ({ok: resp.ok, data})))
+        .then(({ok, data}) => {
+          if (!ok) {
+            showError(data.error || 'Unable to read job status.');
+            return;
+          }
+          $('statusText').textContent = data.message || 'Processing audio...';
+          $('progressFill').style.width = Math.max(25, Math.min(data.progress || 25, 99)) + '%';
+          if (data.status === 'complete') {
+            $('progressFill').style.width = '100%';
+            showResult(data.result || {});
+            $('processBtn').disabled = false;
+            return;
+          }
+          if (data.status === 'failed') {
+            showError(data.error || 'Sanitization failed.');
+            return;
+          }
+          setTimeout(poll, 1200);
+        })
+        .catch(() => showError('Network error while reading job status.'));
+    };
+    poll();
   }
 
   function showResult(data) {
@@ -239,6 +263,8 @@ JS_APP = """\
     $('resultText').textContent = 'File sanitized successfully!';
     const stats = data.stats || {};
     $('statsPanel').innerHTML =
+      '<div class="stat-row"><span class="stat-label">Engine</span><span class="stat-value">' + (stats.processing_engine || 'N/A') + '</span></div>' +
+      '<div class="stat-row"><span class="stat-label">GPU</span><span class="stat-value">' + (stats.gpu_acceleration ? (stats.gpu_device || 'Enabled') : 'Fallback/CPU') + '</span></div>' +
       '<div class="stat-row"><span class="stat-label">Metadata removed</span><span class="stat-value">' + (stats.metadata_removed || 0) + '</span></div>' +
       '<div class="stat-row"><span class="stat-label">Processing time</span><span class="stat-value">' + formatTime(stats.processing_time) + '</span></div>' +
       '<div class="stat-row"><span class="stat-label">Speed</span><span class="stat-value">' + (stats.processing_speed || 'N/A') + '</span></div>';
@@ -297,7 +323,7 @@ HTML_TEMPLATE = """\
 <body data-max-size="{max_size}">
 <header>
   <h1>Melodic Metadata Massacrer</h1>
-  <p class="subtitle">Browser-based audio sanitizer</p>
+  <p class="subtitle">GPU-assisted browser audio sanitizer</p>
 </header>
 <main>
   <div class="warning-banner">
@@ -329,7 +355,7 @@ HTML_TEMPLATE = """\
       <input type="checkbox" id="paranoidToggle">
       <span class="toggle-label">Maximum destruction</span>
     </div>
-    <button id="processBtn" class="btn-primary">Sanitize</button>
+    <button id="processBtn" class="btn-primary">Sanitize with GPU</button>
   </div>
 
   <div id="status" class="status-area" hidden>
@@ -421,6 +447,20 @@ def _cleanup_download_registry(
         stale_path.unlink(missing_ok=True)
 
 
+def _cleanup_job_registry(
+    registry: Dict[str, Dict[str, Any]], max_age: int = DEFAULT_STALE_AGE
+) -> None:
+    """Drop stale background job metadata."""
+    now = time.time()
+    stale_tokens = [
+        token
+        for token, entry in registry.items()
+        if now - float(entry.get("created", 0)) > max_age
+    ]
+    for token in stale_tokens:
+        registry.pop(token, None)
+
+
 # ---------------------------------------------------------------------------
 # Flask application factory
 # ---------------------------------------------------------------------------
@@ -444,6 +484,8 @@ def create_app(
     # Download registry: token -> {"path": Path, "filename": str, "created": float}
     app.config["DOWNLOAD_REGISTRY"]: Dict[str, Dict[str, Any]] = {}
     app.config["DOWNLOAD_REGISTRY_LOCK"] = threading.Lock()
+    app.config["JOB_REGISTRY"]: Dict[str, Dict[str, Any]] = {}
+    app.config["JOB_REGISTRY_LOCK"] = threading.Lock()
 
     max_size_mb = max_file_size // (1024 * 1024)
 
@@ -463,6 +505,8 @@ def create_app(
     def api_status() -> tuple:
         with app.config["DOWNLOAD_REGISTRY_LOCK"]:
             _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
+        with app.config["JOB_REGISTRY_LOCK"]:
+            _cleanup_job_registry(app.config["JOB_REGISTRY"])
         lock: threading.Lock = app.config["PROCESSING_LOCK"]
         busy = not lock.acquire(blocking=False)
         if not busy:
@@ -471,6 +515,7 @@ def create_app(
             "busy": busy,
             "version": "2.0.0",
             "max_file_size_mb": max_size_mb,
+            "gpu_available": cuda_available(),
         }), 200
 
     @app.route("/api/upload", methods=["POST"])
@@ -478,17 +523,27 @@ def create_app(
         lock: threading.Lock = app.config["PROCESSING_LOCK"]
         with app.config["DOWNLOAD_REGISTRY_LOCK"]:
             _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
+        with app.config["JOB_REGISTRY_LOCK"]:
+            _cleanup_job_registry(app.config["JOB_REGISTRY"])
 
         if not lock.acquire(blocking=False):
             return jsonify({"error": "Server is busy processing another file. Please wait."}), 429
 
         try:
-            return _handle_upload(app)
+            return _handle_upload(app, lock)
         except Exception:
+            lock.release()
             app.logger.exception("Upload handler failed")
             return jsonify({"error": "Sanitization failed. Please try a different file."}), 500
-        finally:
-            lock.release()
+
+    @app.route("/api/job/<job_id>")
+    def api_job(job_id: str) -> tuple:
+        with app.config["JOB_REGISTRY_LOCK"]:
+            _cleanup_job_registry(app.config["JOB_REGISTRY"])
+            job = app.config["JOB_REGISTRY"].get(job_id)
+            if job is None:
+                return jsonify({"error": "Job not found or expired."}), 404
+            return jsonify(job), 200
 
     @app.route("/api/download/<token>")
     def api_download(token: str) -> tuple:
@@ -522,27 +577,33 @@ def create_app(
     return app
 
 
-def _handle_upload(app: Flask) -> tuple:
-    """Process an uploaded file. Called inside the processing lock."""
+def _handle_upload(app: Flask, processing_lock: threading.Lock) -> tuple:
+    """Validate an upload and start a background processing job."""
     temp_dir: Path = app.config["UPLOAD_FOLDER"]
-    registry: dict = app.config["DOWNLOAD_REGISTRY"]
+    jobs: dict = app.config["JOB_REGISTRY"]
+
+    def fail_response(payload: dict, status_code: int) -> tuple:
+        processing_lock.release()
+        return jsonify(payload), status_code
 
     # Reap stale files before processing
     _cleanup_old_files(temp_dir)
     with app.config["DOWNLOAD_REGISTRY_LOCK"]:
-        _cleanup_download_registry(registry)
+        _cleanup_download_registry(app.config["DOWNLOAD_REGISTRY"])
+    with app.config["JOB_REGISTRY_LOCK"]:
+        _cleanup_job_registry(jobs)
 
     # Validate upload
     if "file" not in request.files:
-        return jsonify({"error": "No file provided."}), 400
+        return fail_response({"error": "No file provided."}, 400)
 
     f = request.files["file"]
     if not f.filename:
-        return jsonify({"error": "No file selected."}), 400
+        return fail_response({"error": "No file selected."}, 400)
 
     safe_name = secure_filename(f.filename)
     if not safe_name or not _validate_extension(safe_name):
-        return jsonify({"error": "Unsupported file type. Use MP3, WAV, or FLAC."}), 400
+        return fail_response({"error": "Unsupported file type. Use MP3, WAV, or FLAC."}, 400)
 
     # Parse options
     output_format = request.form.get("format", "preserve")
@@ -558,54 +619,151 @@ def _handle_upload(app: Flask) -> tuple:
 
     if not _validate_audio_content(input_path):
         input_path.unlink(missing_ok=True)
-        return jsonify({"error": "Invalid or unsupported audio file."}), 400
+        return fail_response({"error": "Invalid or unsupported audio file."}, 400)
 
     try:
-        # Import preserving sanitizer (deferred to avoid import overhead)
-        from .preserving_sanitizer import preserving_sanitize
+        job_id = uuid.uuid4().hex
+        with app.config["JOB_REGISTRY_LOCK"]:
+            jobs[job_id] = {
+                "id": job_id,
+                "status": "queued",
+                "progress": 25,
+                "message": "Upload complete. Waiting for GPU worker...",
+                "created": time.time(),
+            }
 
-        fmt = None if output_format == "preserve" else output_format
-        result = preserving_sanitize(
-            input_file=input_path,
-            output_file=None,  # auto-generates .clean.<ext>
-            paranoid_mode=paranoid,
-            threat_count=0,
-            output_format=fmt,
-            verbose=False,
+        worker = threading.Thread(
+            target=_process_upload_job,
+            args=(app, job_id, input_path, safe_name, output_format, paranoid, processing_lock),
+            daemon=True,
         )
+        worker.start()
+        return jsonify({
+            "success": True,
+            "job_id": job_id,
+            "message": "Upload accepted. GPU processing started.",
+        }), 202
+    except Exception:
+        input_path.unlink(missing_ok=True)
+        raise
+
+
+def _process_upload_job(
+    app: Flask,
+    job_id: str,
+    input_path: Path,
+    safe_name: str,
+    output_format: str,
+    paranoid: bool,
+    processing_lock: threading.Lock,
+) -> None:
+    """Run sanitization in a background thread."""
+    try:
+        _update_job(app, job_id, status="processing", progress=35, message="Starting CUDA sanitizer...")
+        fmt = None if output_format == "preserve" else output_format
+        result = _sanitize_gpu_first(app, input_path, fmt, paranoid, job_id)
 
         if not result.get("success"):
-            app.logger.exception(
-                "Sanitization failed: %s", result.get("error", "unknown internal error")
+            _update_job(
+                app,
+                job_id,
+                status="failed",
+                progress=100,
+                message="Sanitization failed.",
+                error=result.get("error", "Sanitization failed."),
             )
-            return jsonify({"error": "Sanitization failed."}), 500
+            return
 
-        # Register output for download
+        _update_job(app, job_id, progress=95, message="Preparing download...")
         output_path = Path(result["output_file"])
         token = uuid.uuid4().hex
-
-        # Build a clean download filename
         stem = Path(safe_name).stem
         ext = output_path.suffix
         download_name = f"{stem}_clean{ext}"
 
         with app.config["DOWNLOAD_REGISTRY_LOCK"]:
-            registry[token] = {
+            app.config["DOWNLOAD_REGISTRY"][token] = {
                 "path": str(output_path),
                 "filename": download_name,
                 "created": time.time(),
             }
 
-        return jsonify({
-            "success": True,
-            "download_token": token,
-            "filename": download_name,
-            "stats": result.get("stats", {}),
-        }), 200
-
+        _update_job(
+            app,
+            job_id,
+            status="complete",
+            progress=100,
+            message="Sanitization complete.",
+            result={
+                "success": True,
+                "download_token": token,
+                "filename": download_name,
+                "stats": result.get("stats", {}),
+            },
+        )
+    except Exception as exc:
+        app.logger.exception("Background upload job failed")
+        _update_job(
+            app,
+            job_id,
+            status="failed",
+            progress=100,
+            message="Sanitization failed.",
+            error=str(exc),
+        )
     finally:
-        # Always clean up the input file
         input_path.unlink(missing_ok=True)
+        processing_lock.release()
+
+
+def _sanitize_gpu_first(
+    app: Flask,
+    input_path: Path,
+    output_format: Optional[str],
+    paranoid: bool,
+    job_id: str,
+) -> Dict[str, Any]:
+    try:
+        _update_job(app, job_id, progress=45, message="Processing spectral pass on GPU...")
+        return gpu_web_sanitize(
+            input_file=input_path,
+            output_file=None,
+            paranoid_mode=paranoid,
+            output_format=output_format,
+            verbose=False,
+        )
+    except Exception as exc:
+        app.logger.warning("GPU sanitizer failed; falling back to preserving sanitizer: %s", exc)
+        _update_job(
+            app,
+            job_id,
+            progress=60,
+            message="GPU path failed; using safe CPU fallback...",
+        )
+
+        from .preserving_sanitizer import preserving_sanitize
+
+        result = preserving_sanitize(
+            input_file=input_path,
+            output_file=None,
+            paranoid_mode=paranoid,
+            threat_count=0,
+            output_format=output_format,
+            verbose=False,
+        )
+        stats = result.setdefault("stats", {})
+        stats["processing_engine"] = "cpu_preserving_fallback"
+        stats["gpu_acceleration"] = False
+        stats["gpu_fallback_error"] = str(exc)
+        return result
+
+
+def _update_job(app: Flask, job_id: str, **updates: Any) -> None:
+    with app.config["JOB_REGISTRY_LOCK"]:
+        job = app.config["JOB_REGISTRY"].get(job_id)
+        if job is None:
+            return
+        job.update(updates)
 
 
 # ---------------------------------------------------------------------------

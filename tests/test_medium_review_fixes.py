@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 import mmm.cli as cli_module
 import mmm.core.audio_sanitizer as audio_sanitizer_module
+import mmm.server as server_module
 import mmm.turbo_analysis as turbo_analysis_module
 from mmm.cli import cli
 from mmm.config.config_manager import ConfigManager
@@ -411,3 +412,98 @@ def test_server_download_registry_has_lock():
 
     assert "DOWNLOAD_REGISTRY_LOCK" in app.config
     assert hasattr(app.config["DOWNLOAD_REGISTRY_LOCK"], "acquire")
+    assert "JOB_REGISTRY_LOCK" in app.config
+    assert hasattr(app.config["JOB_REGISTRY_LOCK"], "acquire")
+
+
+def _wait_for_job(client, job_id, timeout=2.0):
+    deadline = time.time() + timeout
+    last_payload = None
+    while time.time() < deadline:
+        response = client.get(f"/api/job/{job_id}")
+        last_payload = response.get_json()
+        if last_payload.get("status") in {"complete", "failed"}:
+            return response
+        time.sleep(0.02)
+    raise AssertionError(f"job did not finish: {last_payload}")
+
+
+def test_server_upload_runs_gpu_background_job(monkeypatch):
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+
+    monkeypatch.setattr(server_module, "_validate_audio_content", lambda _path: True)
+
+    def fake_gpu_web_sanitize(input_file, output_file=None, **_kwargs):
+        output_path = Path(input_file).with_suffix(".clean.wav")
+        output_path.write_bytes(b"clean")
+        return {
+            "success": True,
+            "output_file": str(output_path),
+            "stats": {
+                "processing_engine": "gpu_cuda_web",
+                "gpu_acceleration": True,
+                "gpu_device": "test-gpu",
+            },
+        }
+
+    monkeypatch.setattr(server_module, "gpu_web_sanitize", fake_gpu_web_sanitize)
+
+    response = client.post(
+        "/api/upload",
+        data={
+            "file": (BytesIO(b"audio"), "test.wav"),
+            "format": "preserve",
+            "paranoid": "false",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    job_response = _wait_for_job(client, response.get_json()["job_id"])
+    payload = job_response.get_json()
+    assert payload["status"] == "complete"
+    assert payload["result"]["stats"]["processing_engine"] == "gpu_cuda_web"
+    assert payload["result"]["stats"]["gpu_acceleration"] is True
+
+
+def test_server_upload_falls_back_when_gpu_fails(monkeypatch):
+    import mmm.preserving_sanitizer as preserving_module
+
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+
+    monkeypatch.setattr(server_module, "_validate_audio_content", lambda _path: True)
+
+    def fake_gpu_web_sanitize(*_args, **_kwargs):
+        raise RuntimeError("cuda oom")
+
+    def fake_preserving_sanitize(input_file, output_file=None, **_kwargs):
+        output_path = Path(input_file).with_suffix(".clean.wav")
+        output_path.write_bytes(b"clean")
+        return {
+            "success": True,
+            "output_file": str(output_path),
+            "stats": {"processing_time": 1.0},
+        }
+
+    monkeypatch.setattr(server_module, "gpu_web_sanitize", fake_gpu_web_sanitize)
+    monkeypatch.setattr(preserving_module, "preserving_sanitize", fake_preserving_sanitize)
+
+    response = client.post(
+        "/api/upload",
+        data={
+            "file": (BytesIO(b"audio"), "test.wav"),
+            "format": "preserve",
+            "paranoid": "false",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    job_response = _wait_for_job(client, response.get_json()["job_id"])
+    payload = job_response.get_json()
+    assert payload["status"] == "complete"
+    assert payload["result"]["stats"]["processing_engine"] == "cpu_preserving_fallback"
+    assert payload["result"]["stats"]["gpu_acceleration"] is False
+    assert "cuda oom" in payload["result"]["stats"]["gpu_fallback_error"]

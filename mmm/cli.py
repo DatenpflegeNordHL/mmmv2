@@ -918,7 +918,7 @@ def config_reset():
 )
 @click.option(
     "--max-size",
-    default=500,
+    default=95,
     show_default=True,
     type=int,
     help="Maximum upload file size in MB",
