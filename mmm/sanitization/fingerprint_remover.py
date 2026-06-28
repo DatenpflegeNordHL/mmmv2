@@ -100,7 +100,16 @@ class FingerprintRemover:
             if grid_result.get("details"):
                 result["temporal_metrics"].extend(grid_result["details"])
 
-            # Method 5: Human-like imperfections
+            # Method 5: Continuous natural drift and dynamics variation
+            drift_result = self._natural_drift_humanization(
+                cleaned_channel, sample_rate
+            )
+            cleaned_channel = drift_result["cleaned_data"]
+            result["removal_methods"].append("natural_drift_humanization")
+            if drift_result.get("details"):
+                result["temporal_metrics"].extend(drift_result["details"])
+
+            # Method 6: Human-like imperfections
             if self.paranoid_mode:
                 imperfection_result = self._add_human_imperfections(
                     cleaned_channel, sample_rate
@@ -419,6 +428,130 @@ class FingerprintRemover:
         fade = np.hanning(window.size)
         fade = np.maximum(fade, 0.05)
         audio_data[start:end] = window * (1.0 - fade) + shifted * fade
+
+    def _natural_drift_humanization(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
+        """
+        Add continuous, bounded human-like timing and dynamics variation.
+
+        The external audio-quality-humanizer project applies subtle timing,
+        envelope, and quiet-section noise variation as a quality-preserving
+        humanization pass. This adapts that idea for MMM's in-memory sanitizer:
+        it avoids changing duration or channel layout while perturbing slow,
+        machine-perfect temporal and amplitude regularity that discrete onset
+        shifts alone do not cover.
+        """
+        result = {"cleaned_data": audio_data.copy(), "details": []}
+        if sample_rate <= 0 or audio_data.size < max(256, sample_rate // 4):
+            return result
+
+        original = audio_data.astype(float, copy=False)
+        cleaned = original.copy()
+        n_samples = cleaned.size
+        indices = np.arange(n_samples, dtype=float)
+        time = indices / float(sample_rate)
+
+        max_delay_samples = (0.00016 if self.paranoid_mode else 0.00009) * sample_rate
+        max_delay_samples = float(np.clip(max_delay_samples, 0.35, 8.0))
+        drift = (
+            0.62
+            * np.sin(
+                2 * np.pi * 0.17 * time + np.random.uniform(0, 2 * np.pi)
+            )
+            + 0.28
+            * np.sin(
+                2 * np.pi * 0.43 * time + np.random.uniform(0, 2 * np.pi)
+            )
+        )
+        control_count = max(4, min(64, int(np.ceil(n_samples / sample_rate * 6))))
+        control_x = np.linspace(0, n_samples - 1, control_count)
+        control_y = np.random.normal(0.0, 0.18, control_count)
+        random_drift = np.interp(indices, control_x, control_y)
+        drift = max_delay_samples * (drift + random_drift)
+        drift *= max_delay_samples / (np.max(np.abs(drift)) + 1e-12)
+        source_positions = np.clip(indices - drift, 0, n_samples - 1)
+        cleaned = np.interp(source_positions, indices, cleaned)
+
+        gain_depth = 0.008 if self.paranoid_mode else 0.0045
+        gain_points = max(4, min(96, int(np.ceil(n_samples / sample_rate * 10))))
+        gain_x = np.linspace(0, n_samples - 1, gain_points)
+        gain_y = np.random.normal(0.0, 1.0, gain_points)
+        if gain_points >= 7:
+            window = min(gain_points if gain_points % 2 else gain_points - 1, 15)
+            gain_y = signal.savgol_filter(gain_y, window, min(3, window - 1))
+        gain_variation = np.interp(indices, gain_x, gain_y)
+        gain_variation /= np.max(np.abs(gain_variation)) + 1e-12
+        cleaned *= 1.0 + gain_depth * gain_variation
+
+        quiet_noise_frames = self._add_quiet_section_dither(
+            cleaned,
+            original,
+            sample_rate,
+            noise_ratio=0.0011 if self.paranoid_mode else 0.00055,
+        )
+
+        peak_limited = False
+        peak = float(np.max(np.abs(cleaned))) if cleaned.size else 0.0
+        if peak > 0.995:
+            cleaned *= 0.995 / peak
+            peak_limited = True
+
+        rms_delta = float(
+            np.sqrt(np.mean((cleaned - original) ** 2))
+            / (np.sqrt(np.mean(original**2)) + 1e-12)
+        )
+        result["cleaned_data"] = cleaned
+        result["details"].append(
+            {
+                "metric": "natural_drift_humanization",
+                "max_delay_samples": max_delay_samples,
+                "gain_depth": float(gain_depth),
+                "quiet_noise_frames": int(quiet_noise_frames),
+                "rms_delta_ratio": rms_delta,
+                "peak_limited": peak_limited,
+            }
+        )
+        return result
+
+    def _add_quiet_section_dither(
+        self,
+        cleaned: np.ndarray,
+        original: np.ndarray,
+        sample_rate: int,
+        noise_ratio: float,
+    ) -> int:
+        """Add low-level noise only to quiet frames and return touched frames."""
+        signal_std = float(np.std(original))
+        if signal_std <= 1e-10:
+            return 0
+
+        frame_length = max(64, min(2048, sample_rate // 20))
+        hop_length = max(16, frame_length // 4)
+        frame_count = 0
+        quiet_noise_frames = 0
+        frame_rms: List[float] = []
+        for start in range(0, max(1, original.size - frame_length + 1), hop_length):
+            frame = original[start : start + frame_length]
+            frame_rms.append(float(np.sqrt(np.mean(frame**2))))
+            frame_count += 1
+        if frame_count == 0:
+            return 0
+
+        quiet_threshold = float(np.percentile(frame_rms, 20))
+        noise_level = signal_std * noise_ratio
+        for frame_index, start in enumerate(
+            range(0, max(1, original.size - frame_length + 1), hop_length)
+        ):
+            if frame_rms[frame_index] > quiet_threshold:
+                continue
+            end = min(start + frame_length, cleaned.size)
+            fade = np.hanning(end - start)
+            if fade.size == 0:
+                continue
+            cleaned[start:end] += np.random.normal(0.0, noise_level, end - start) * fade
+            quiet_noise_frames += 1
+        return quiet_noise_frames
 
     def _add_human_imperfections(
         self, audio_data: np.ndarray, sample_rate: int

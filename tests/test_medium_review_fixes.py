@@ -607,6 +607,48 @@ def test_temporal_grid_perturbation_breaks_perfect_onset_spacing(monkeypatch):
     assert not np.allclose(result["cleaned_data"], audio)
 
 
+def test_natural_drift_humanization_adds_bounded_continuous_variation():
+    np.random.seed(1234)
+    remover = FingerprintRemover()
+    sr = 8000
+    t = np.linspace(0, 2.0, sr * 2, endpoint=False)
+    audio = (
+        0.18 * np.sin(2 * np.pi * 110 * t)
+        + 0.04 * np.sin(2 * np.pi * 330 * t)
+    ).astype(np.float32)
+
+    result = remover._natural_drift_humanization(audio, sr)
+    cleaned = result["cleaned_data"]
+    metric = result["details"][0]
+
+    assert cleaned.shape == audio.shape
+    assert not np.allclose(cleaned, audio)
+    assert metric["metric"] == "natural_drift_humanization"
+    assert metric["max_delay_samples"] > 0
+    assert metric["quiet_noise_frames"] > 0
+    assert 0.0 < metric["rms_delta_ratio"] < 0.08
+    assert np.max(np.abs(cleaned)) <= 0.995
+
+
+def test_remove_fingerprints_reports_natural_humanization_metrics():
+    np.random.seed(5678)
+    remover = FingerprintRemover(paranoid_mode=True)
+    sr = 8000
+    t = np.linspace(0, 0.5, sr // 2, endpoint=False)
+    audio = (0.12 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+
+    result = remover.remove_fingerprints(audio, sr)
+    metric_names = {
+        metric["metric"]
+        for metric in result["temporal_metrics"]
+        if "metric" in metric
+    }
+
+    assert "natural_drift_humanization" in result["removal_methods"]
+    assert "natural_drift_humanization" in metric_names
+    assert result["cleaned_audio"].shape == audio.shape
+
+
 def test_fingerprint_quality_metrics_do_not_broadcast_mono_channel():
     remover = FingerprintRemover()
     sr = 8000
