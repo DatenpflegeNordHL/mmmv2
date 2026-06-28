@@ -177,6 +177,7 @@ main{
 .dropzone .filename{
   color:var(--cyan);font-weight:800;margin-top:.85rem;word-break:break-all;
   text-shadow:0 0 12px rgba(52,247,255,.7);
+  max-width:100%;overflow-wrap:anywhere;word-break:break-word;
 }
 .options-panel{
   background:var(--panel-soft);border:1px solid rgba(52,247,255,.25);
@@ -353,7 +354,7 @@ footer.footer-credits .credit-secondary{color:#7f7598}
 .lufs-meter span{display:block;height:100%;width:0;background:linear-gradient(90deg,#22c55e,#38bdf8,#a855f7);transition:width .35s}
 .spectral-risk-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
 .timeline-panel h2{font-size:.8rem;color:#e2e8f0;margin-bottom:.6rem;line-height:1.2}
-.timeline-panel ol{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.52rem;list-style:none;counter-reset:steps}
+.timeline-panel ol{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.52rem;list-style:none;counter-reset:steps}
 .timeline-panel li{
   counter-increment:steps;position:relative;padding:.62rem .52rem .62rem 1.82rem;border-radius:11px;
   background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.14);color:#94a3b8;font-size:.6rem;
@@ -382,18 +383,18 @@ footer.footer-credits .credit-secondary{color:#7f7598}
     display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr);
     gap:.62rem;align-items:start;
   }
-  .console-card,.visualizer-card,.control-strip,.timeline-panel{grid-column:1}
-  .analysis-preview,.spectral-risk-grid,#status,#result,#error{grid-column:2}
-  .console-card{grid-row:1}
-  .visualizer-card{grid-row:2}
+  .visualizer-card,.console-card,.control-strip{grid-column:1}
+  .analysis-preview,.timeline-panel,.spectral-risk-grid,#status,#result,#error{grid-column:2}
+  .visualizer-card{grid-row:1;margin-top:0}
+  .console-card{grid-row:2}
   .control-strip{grid-row:3}
-  .timeline-panel{grid-row:4}
   .analysis-preview{grid-row:1;margin-top:0}
-  .spectral-risk-grid{grid-row:2;margin-top:0}
-  #status,#result,#error{grid-row:3 / span 2;margin-top:.55rem}
+  .timeline-panel{grid-row:2;margin-top:.62rem}
+  .spectral-risk-grid{grid-row:3;margin-top:.62rem}
+  #status,#result,#error{grid-row:4;margin-top:.62rem}
   .analysis-preview{grid-template-columns:repeat(2,minmax(0,1fr))}
   .spectral-risk-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
-  .timeline-panel ol{grid-template-columns:repeat(4,minmax(0,1fr));gap:.48rem}
+  .timeline-panel ol{grid-template-columns:repeat(2,minmax(0,1fr));gap:.48rem}
   .control-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 """
@@ -1029,6 +1030,18 @@ HTML_TEMPLATE = """\
   <span class="beta-badge">Local engine beta</span>
 </header>
 <main class="quality-console">
+  <section class="visualizer-card" aria-label="Audio preview visualizer">
+    <div class="visualizer-header">
+      <span class="visualizer-title">Preview Visualizer</span>
+      <span id="visualizerStatus" class="visualizer-status">Drop audio to preview waveform</span>
+    </div>
+    <canvas id="waveCanvas" class="wave-canvas" width="720" height="104" aria-hidden="true"></canvas>
+    <div class="visualizer-controls">
+      <button id="playPreviewBtn" class="visualizer-button" type="button" disabled>Play</button>
+    </div>
+    <audio id="previewAudio" preload="metadata" hidden></audio>
+  </section>
+
   <section class="console-card" aria-label="Mastering upload console">
     <div class="console-topbar">
       <div class="engine-brand">
@@ -1052,18 +1065,6 @@ HTML_TEMPLATE = """\
       <span>Metadata parsed safely</span>
       <span>Preview available</span>
     </div>
-  </section>
-
-  <section class="visualizer-card" aria-label="Audio preview visualizer">
-    <div class="visualizer-header">
-      <span class="visualizer-title">Preview Visualizer</span>
-      <span id="visualizerStatus" class="visualizer-status">Drop audio to preview waveform</span>
-    </div>
-    <canvas id="waveCanvas" class="wave-canvas" width="720" height="104" aria-hidden="true"></canvas>
-    <div class="visualizer-controls">
-      <button id="playPreviewBtn" class="visualizer-button" type="button" disabled>Play</button>
-    </div>
-    <audio id="previewAudio" preload="metadata" hidden></audio>
   </section>
 
   <section id="options" class="control-strip" hidden>
@@ -1135,14 +1136,6 @@ HTML_TEMPLATE = """\
     <div class="metric-card readiness"><span>Release Readiness</span><strong id="metricReadiness">Available after processing</strong></div>
   </section>
 
-  <section class="spectral-risk-grid" aria-label="Spectral risk checks">
-    <div><span>Ultra Low</span><strong id="bandSub">Pending</strong></div>
-    <div><span>Low Mid</span><strong id="bandLowMid">Pending</strong></div>
-    <div><span>Presence</span><strong id="bandPresence">Pending</strong></div>
-    <div><span>Harsh</span><strong id="bandHarsh">Pending</strong></div>
-    <div><span>Air</span><strong id="bandAir">Pending</strong></div>
-  </section>
-
   <section class="timeline-panel">
     <h2>Processing Timeline</h2>
     <ol id="timelineList">
@@ -1155,6 +1148,14 @@ HTML_TEMPLATE = """\
       <li data-step="limit">Preview limited</li>
       <li data-step="report">Report generated</li>
     </ol>
+  </section>
+
+  <section class="spectral-risk-grid" aria-label="Spectral risk checks">
+    <div><span>Ultra Low</span><strong id="bandSub">Pending</strong></div>
+    <div><span>Low Mid</span><strong id="bandLowMid">Pending</strong></div>
+    <div><span>Presence</span><strong id="bandPresence">Pending</strong></div>
+    <div><span>Harsh</span><strong id="bandHarsh">Pending</strong></div>
+    <div><span>Air</span><strong id="bandAir">Pending</strong></div>
   </section>
 
   <div id="status" class="status-area" hidden>

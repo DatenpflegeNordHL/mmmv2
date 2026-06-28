@@ -213,7 +213,11 @@ def test_web_ui_renders_audio_quality_console():
     assert "/api/preview/" in html
     assert "requestAnimationFrame" in html
     assert "createMediaElementSource" in html
-    assert ".timeline-panel ol{display:grid;grid-template-columns:repeat(4" in html
+    assert html.index('class="visualizer-card"') < html.index('class="console-card"')
+    assert ".timeline-panel ol{display:grid;grid-template-columns:repeat(2" in html
+    assert ".visualizer-card,.console-card,.control-strip{grid-column:1}" in html
+    assert ".analysis-preview,.timeline-panel,.spectral-risk-grid,#status,#result,#error{grid-column:2}" in html
+    assert ".console-card,.visualizer-card,.control-strip,.timeline-panel{grid-column:1}" not in html
 
 
 def test_web_ui_has_single_primary_processing_action():
