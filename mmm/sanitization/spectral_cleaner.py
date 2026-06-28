@@ -24,7 +24,9 @@ class SpectralCleaner:
         self.max_notch_filters = 20 if paranoid_mode else 12
         self.max_verification_samples = 131072
         self.max_autocorr_samples = 16384
-        self.max_spectral_delta_ratio = 0.12 if paranoid_mode else 0.08
+        self.max_spectral_delta_ratio = 0.18 if paranoid_mode else 0.10
+        self.adaptive_scrub_depth = 0.085 if paranoid_mode else 0.045
+        self.persistent_bin_attenuation = 0.55 if paranoid_mode else 0.72
         self.watermark_freq_bands = [
             (18000, 18500),  # Known AI watermark ranges
             (19000, 19500),
@@ -80,6 +82,16 @@ class SpectralCleaner:
             if targeted_result["modified_regions"]:
                 result["methods_used"].append("targeted_detector_masks")
                 result["modified_regions"].extend(targeted_result["modified_regions"])
+
+            scrub_result = self._adaptive_spectral_fingerprint_scrub(
+                cleaned_channel, sample_rate, detector_findings, channel_idx
+            )
+            cleaned_channel = scrub_result["cleaned_data"]
+            if scrub_result["modified_regions"]:
+                result["methods_used"].append("adaptive_spectral_fingerprint_scrub")
+                result["modified_regions"].extend(scrub_result["modified_regions"])
+            if scrub_result["details"]:
+                result["details"].extend(scrub_result["details"])
 
             # Method 1: High-frequency watermark removal
             watermark_result = self._remove_high_frequency_watermarks(
@@ -225,6 +237,121 @@ class SpectralCleaner:
             )
 
         result["cleaned_data"] = np.real(ifft(fft_mod))
+        return result
+
+    def _adaptive_spectral_fingerprint_scrub(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        detector_findings: Optional[Dict[str, Any]],
+        channel_idx: int,
+    ) -> Dict[str, Any]:
+        """
+        Disrupt stable AI-like spectral grids with bounded STFT-domain changes.
+
+        This targets two common detector cues: persistent narrow bins and
+        frame-to-frame over-regularity in the upper spectrum. It keeps the
+        magnitude envelope close to the source while adding smoothed gain and
+        phase variation inside suspicious bands.
+        """
+        result = {
+            "cleaned_data": audio_data.copy(),
+            "modified_regions": [],
+            "details": [],
+        }
+        if audio_data.size < 1024 or sample_rate <= 0:
+            return result
+
+        n_fft = min(2048, 2 ** int(np.floor(np.log2(max(1024, audio_data.size // 4)))))
+        n_fft = max(1024, min(n_fft, audio_data.size))
+        hop_length = max(128, n_fft // 4)
+        stft = librosa.stft(audio_data, n_fft=n_fft, hop_length=hop_length, center=True)
+        magnitude = np.abs(stft)
+        phase = np.angle(stft)
+        freqs = librosa.fft_frequencies(sr=sample_rate, n_fft=n_fft)
+
+        target_bands = self._extract_target_bands(
+            detector_findings, sample_rate, channel_idx
+        )
+        if not target_bands:
+            nyquist = sample_rate / 2
+            target_bands = [
+                {
+                    "method": "adaptive",
+                    "source": "upper_spectrum_regularities",
+                    "start_hz": min(12000.0, nyquist * 0.62),
+                    "end_hz": min(nyquist - 1.0, 21000.0),
+                }
+            ]
+
+        modified = False
+        phase_mod = phase.copy()
+        mag_mod = magnitude.copy()
+        frame_count = magnitude.shape[1]
+        smooth_width = 9 if self.paranoid_mode else 13
+        kernel = np.hanning(smooth_width)
+        kernel = kernel / max(np.sum(kernel), 1e-12)
+
+        for band in target_bands:
+            band_mask = (freqs >= band["start_hz"]) & (freqs <= band["end_hz"])
+            if not np.any(band_mask):
+                continue
+
+            band_mag = magnitude[band_mask, :]
+            bin_energy = np.mean(band_mag, axis=1)
+            temporal_std = np.std(band_mag, axis=1)
+            cv = temporal_std / (bin_energy + 1e-12)
+            persistent_threshold = np.percentile(bin_energy, 75)
+            persistent_bins = bin_energy >= persistent_threshold
+            low_variance_bins = cv <= np.percentile(cv, 35)
+            scrub_bins = persistent_bins | low_variance_bins
+            if not np.any(scrub_bins):
+                continue
+
+            band_indices = np.where(band_mask)[0]
+            scrub_indices = band_indices[scrub_bins]
+            frame_noise = np.random.normal(0.0, self.adaptive_scrub_depth, frame_count)
+            frame_noise = np.convolve(frame_noise, kernel, mode="same")
+            gain = np.clip(1.0 + frame_noise, 0.86, 1.08)
+            phase_jitter = np.random.normal(
+                0.0,
+                0.010 if self.paranoid_mode else 0.005,
+                (scrub_indices.size, frame_count),
+            )
+
+            mag_mod[scrub_indices, :] *= gain[None, :]
+            mag_mod[scrub_indices, :] *= self.persistent_bin_attenuation
+            phase_mod[scrub_indices, :] += phase_jitter
+            modified = True
+            result["modified_regions"].append(
+                {
+                    "channel": channel_idx,
+                    "method": band.get("method", "adaptive"),
+                    "source": band.get("source", "adaptive_spectral_scrub"),
+                    "start_hz": float(band["start_hz"]),
+                    "end_hz": float(band["end_hz"]),
+                    "bins_modified": int(scrub_indices.size),
+                    "attenuation": self.persistent_bin_attenuation,
+                    "gain_modulation_depth": self.adaptive_scrub_depth,
+                }
+            )
+            result["details"].append(
+                {
+                    "metric": "spectral_regular_bin_scrub",
+                    "channel": channel_idx,
+                    "band_start_hz": float(band["start_hz"]),
+                    "band_end_hz": float(band["end_hz"]),
+                    "mean_cv_before": float(np.mean(cv)),
+                    "modified_bin_ratio": float(scrub_indices.size / max(band_indices.size, 1)),
+                }
+            )
+
+        if modified:
+            modified_stft = mag_mod * np.exp(1j * phase_mod)
+            result["cleaned_data"] = librosa.istft(
+                modified_stft, hop_length=hop_length, length=len(audio_data)
+            )
+
         return result
 
     def _limit_spectral_distance(

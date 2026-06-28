@@ -50,6 +50,7 @@ class FingerprintRemover:
             "fingerprints_detected": [],
             "removal_methods": [],
             "quality_metrics": {},
+            "temporal_metrics": [],
         }
 
         # Ensure stereo handling
@@ -88,6 +89,16 @@ class FingerprintRemover:
             )
             cleaned_channel = timing_result["cleaned_data"]
             result["removal_methods"].append("micro_timing_perturbation")
+            if timing_result.get("details"):
+                result["temporal_metrics"].extend(timing_result["details"])
+
+            grid_result = self._temporal_grid_perturbation(
+                cleaned_channel, sample_rate
+            )
+            cleaned_channel = grid_result["cleaned_data"]
+            result["removal_methods"].append("temporal_grid_perturbation")
+            if grid_result.get("details"):
+                result["temporal_metrics"].extend(grid_result["details"])
 
             # Method 5: Human-like imperfections
             if self.paranoid_mode:
@@ -227,7 +238,7 @@ class FingerprintRemover:
         self, audio_data: np.ndarray, sample_rate: int
     ) -> Dict[str, Any]:
         """Apply micro-timing perturbations to break AI timing patterns"""
-        result = {"cleaned_data": audio_data.copy()}
+        result = {"cleaned_data": audio_data.copy(), "details": []}
 
         # Identify transient points (onsets, attacks)
         # Use high-frequency content to find transients
@@ -243,10 +254,15 @@ class FingerprintRemover:
         peaks, _ = signal.find_peaks(envelope, height=np.max(envelope) * 0.1)
 
         # Apply micro-timing shifts to transients
-        shift_range_samples = int(0.001 * sample_rate)  # 1ms maximum shift
+        shift_range_samples = max(
+            1, int((0.0018 if self.paranoid_mode else 0.001) * sample_rate)
+        )
+        shifted_transients = 0
+        attempted_transients = 0
 
         for peak in peaks:
             if 50 < peak < len(audio_data) - 50:  # Avoid edges
+                attempted_transients += 1
                 # Random small shift
                 shift_samples = np.random.randint(
                     -shift_range_samples, shift_range_samples + 1
@@ -282,8 +298,127 @@ class FingerprintRemover:
                         right=window_data[-1],
                     )
                     result["cleaned_data"][window_start:window_end] = shifted_window
+                    shifted_transients += 1
+
+        result["details"].append(
+            {
+                "metric": "micro_timing_transient_shift",
+                "attempted_transients": int(attempted_transients),
+                "shifted_transients": int(shifted_transients),
+                "max_shift_samples": int(shift_range_samples),
+            }
+        )
 
         return result
+
+    def _temporal_grid_perturbation(
+        self, audio_data: np.ndarray, sample_rate: int
+    ) -> Dict[str, Any]:
+        """
+        Break machine-regular onset grids with local, bounded timing offsets.
+
+        AI music detectors often score very consistent onset intervals as a
+        temporal fingerprint. This method detects low-variance onset spacing and
+        applies small per-onset shifts, with stronger but still bounded shifts in
+        paranoid mode.
+        """
+        result = {"cleaned_data": audio_data.copy(), "details": []}
+        if audio_data.size < max(256, sample_rate // 10) or sample_rate <= 0:
+            return result
+
+        envelope = np.abs(audio_data)
+        smooth_window = max(3, int(sample_rate * 0.006))
+        kernel = np.ones(smooth_window) / smooth_window
+        envelope = np.convolve(envelope, kernel, mode="same")
+        peak_height = max(float(np.max(envelope)) * 0.18, float(np.percentile(envelope, 88)))
+        min_distance = max(1, int(sample_rate * 0.055))
+        peaks, _ = signal.find_peaks(
+            envelope,
+            height=peak_height,
+            distance=min_distance,
+        )
+        if len(peaks) < 4:
+            return result
+
+        intervals = np.diff(peaks)
+        interval_cv_before = float(np.std(intervals) / (np.mean(intervals) + 1e-12))
+        regular_grid = interval_cv_before < (0.11 if self.paranoid_mode else 0.08)
+        if not regular_grid:
+            result["details"].append(
+                {
+                    "metric": "temporal_grid_regularization",
+                    "regular_grid_detected": False,
+                    "interval_cv_before": interval_cv_before,
+                    "shifted_onsets": 0,
+                }
+            )
+            return result
+
+        max_shift = max(
+            1, int((0.006 if self.paranoid_mode else 0.0035) * sample_rate)
+        )
+        window_radius = max(24, int((0.018 if self.paranoid_mode else 0.012) * sample_rate))
+        shifted_positions: List[int] = []
+        for index, peak in enumerate(peaks[1:-1], start=1):
+            if peak <= window_radius or peak >= len(audio_data) - window_radius:
+                continue
+            direction = -1 if index % 2 == 0 else 1
+            random_component = np.random.randint(max(1, max_shift // 3), max_shift + 1)
+            shift_samples = direction * int(random_component)
+            self._shift_transient_window(
+                result["cleaned_data"], int(peak), window_radius, shift_samples
+            )
+            shifted_positions.append(int(peak + shift_samples))
+
+        if shifted_positions:
+            adjusted_peaks = peaks.copy()
+            adjusted_peaks[1 : 1 + len(shifted_positions)] = shifted_positions
+            adjusted_intervals = np.diff(np.sort(adjusted_peaks))
+            interval_cv_after = float(
+                np.std(adjusted_intervals)
+                / (np.mean(adjusted_intervals) + 1e-12)
+            )
+        else:
+            interval_cv_after = interval_cv_before
+
+        result["details"].append(
+            {
+                "metric": "temporal_grid_regularization",
+                "regular_grid_detected": True,
+                "onset_count": int(len(peaks)),
+                "shifted_onsets": int(len(shifted_positions)),
+                "max_shift_samples": int(max_shift),
+                "interval_cv_before": interval_cv_before,
+                "interval_cv_after": interval_cv_after,
+            }
+        )
+        return result
+
+    def _shift_transient_window(
+        self,
+        audio_data: np.ndarray,
+        center: int,
+        radius: int,
+        shift_samples: int,
+    ) -> None:
+        """Shift one transient region in-place with crossfaded boundaries."""
+        start = max(0, center - radius)
+        end = min(len(audio_data), center + radius)
+        if end - start < 8 or shift_samples == 0:
+            return
+
+        window = audio_data[start:end].copy()
+        indices = np.arange(window.size)
+        shifted = np.interp(
+            np.clip(indices - shift_samples, 0, window.size - 1),
+            indices,
+            window,
+            left=window[0],
+            right=window[-1],
+        )
+        fade = np.hanning(window.size)
+        fade = np.maximum(fade, 0.05)
+        audio_data[start:end] = window * (1.0 - fade) + shifted * fade
 
     def _add_human_imperfections(
         self, audio_data: np.ndarray, sample_rate: int

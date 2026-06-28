@@ -304,6 +304,9 @@ class AudioSanitizer:
             )
             sanitized_audio = fingerprint_result["cleaned_audio"]
             methods_used.extend(fingerprint_result.get("removal_methods", []))
+            self.processing_stats["temporal_metrics"] = fingerprint_result.get(
+                "temporal_metrics", []
+            )
 
             # Phase 4: Final cleanup and quality preservation
             self._info("Phase 4: Final sanitization...")

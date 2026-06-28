@@ -537,6 +537,45 @@ def test_spectral_cleaner_records_targeted_detector_masks():
     assert result["modified_regions"][0]["end_hz"] > 18000
 
 
+def test_adaptive_spectral_scrub_reduces_stable_high_frequency_grid():
+    sr = 44100
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    audio = (
+        0.15 * np.sin(2 * np.pi * 440 * t)
+        + 0.05 * np.sin(2 * np.pi * 18000 * t)
+    ).astype(np.float32)
+    findings = {
+        "detected": [
+            {
+                "method": "suno_55_spectral_probe",
+                "details": [
+                    {
+                        "channel": 0,
+                        "frequency": 18000,
+                        "type": "consistent_spectral_peaks",
+                    }
+                ],
+            }
+        ]
+    }
+    cleaner = SpectralCleaner(paranoid_mode=True)
+
+    result = cleaner._adaptive_spectral_fingerprint_scrub(
+        audio, sr, findings, channel_idx=0
+    )
+
+    freqs = np.fft.rfftfreq(audio.size, 1 / sr)
+    band = (freqs >= 17875) & (freqs <= 18125)
+    original_band_power = float(np.mean(np.abs(np.fft.rfft(audio)[band]) ** 2))
+    cleaned_band_power = float(
+        np.mean(np.abs(np.fft.rfft(result["cleaned_data"])[band]) ** 2)
+    )
+
+    assert result["modified_regions"]
+    assert result["modified_regions"][0]["bins_modified"] > 0
+    assert cleaned_band_power < original_band_power
+
+
 def test_micro_timing_perturbation_moves_transient(monkeypatch):
     remover = FingerprintRemover()
     sr = 8000
@@ -548,6 +587,24 @@ def test_micro_timing_perturbation_moves_transient(monkeypatch):
     result = remover._micro_timing_perturbation(audio, sr)["cleaned_data"]
 
     assert int(np.argmax(result)) != 1000
+
+
+def test_temporal_grid_perturbation_breaks_perfect_onset_spacing(monkeypatch):
+    remover = FingerprintRemover(paranoid_mode=True)
+    sr = 8000
+    audio = np.zeros(sr * 2, dtype=np.float32)
+    pulse_positions = np.arange(1000, audio.size - 1000, 2000)
+    audio[pulse_positions] = 1.0
+
+    monkeypatch.setattr(np.random, "randint", lambda low, high=None, **_kwargs: high - 1)
+
+    result = remover._temporal_grid_perturbation(audio, sr)
+    metric = result["details"][0]
+
+    assert metric["regular_grid_detected"] is True
+    assert metric["shifted_onsets"] > 0
+    assert metric["interval_cv_after"] > metric["interval_cv_before"]
+    assert not np.allclose(result["cleaned_data"], audio)
 
 
 def test_fingerprint_quality_metrics_do_not_broadcast_mono_channel():
