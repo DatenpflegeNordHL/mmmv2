@@ -307,7 +307,7 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   border:1px solid rgba(148,163,184,.16);box-shadow:inset 0 0 28px rgba(30,41,59,.45);
   padding:1rem;
 }
-.mode-group{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.9rem}
+.mode-group{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-bottom:.9rem}
 .mode-button{
   border:1px solid rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.68);
   color:#cbd5e1;padding:.6rem .5rem;font-weight:750;cursor:pointer;
@@ -329,6 +329,7 @@ footer.footer-credits .credit-secondary{color:#7f7598}
 .lufs-card{grid-column:span 2}
 .metric-card span,.meter-card span,.spectral-risk-grid span{display:block;color:#94a3b8;font-size:.74rem;margin-bottom:.35rem}
 .metric-card strong,.meter-card strong,.spectral-risk-grid strong{color:#f8fafc;font-size:1rem}
+.lufs-card small{display:block;margin-top:.2rem;color:#c4b5fd;font-size:.74rem}
 .metric-card.readiness strong{color:#67e8f9}
 .lufs-meter{height:7px;border-radius:999px;background:#111827;margin-top:.7rem;overflow:hidden}
 .lufs-meter span{display:block;height:100%;width:0;background:linear-gradient(90deg,#22c55e,#38bdf8,#a855f7);transition:width .35s}
@@ -391,7 +392,8 @@ JS_APP = """\
       analyze_only: 'Analyze Only',
       safe_master: 'Analyze & Master',
       naturalize: 'Naturalize Pass',
-      full_release: 'Analyze & Master'
+      full_release: 'Analyze & Master',
+      legacy_sanitize: 'Legacy GPU Clean'
     };
     $('processBtn').textContent = labels[mode] || 'Analyze & Master';
   }
@@ -437,7 +439,7 @@ JS_APP = """\
     if (!selectedFile) return;
     const fmt = $('formatSelect').value;
     const paranoid = $('paranoidToggle').checked;
-    const mode = paranoid ? 'legacy_sanitize' : selectedMode;
+    const mode = selectedMode;
 
     // Show status
     options.hidden = true;
@@ -562,7 +564,7 @@ JS_APP = """\
     }
     setReportLink('jsonReportLink', data.report_artifacts && data.report_artifacts.json_download_token);
     setReportLink('htmlReportLink', data.report_artifacts && data.report_artifacts.html_download_token);
-    setTimeline(['upload','metadata','loudness','dc','spectrum','render','limit','report']);
+    setTimeline(data.processing_steps || []);
   }
 
   function showError(msg) {
@@ -605,6 +607,10 @@ JS_APP = """\
     const before = data.metrics_before || {};
     const after = data.metrics_after || before;
     const metrics = after || {};
+    if (data.mode === 'legacy_sanitize' && !data.metrics_after) {
+      resetMetrics('Legacy sanitizer path');
+      return;
+    }
     $('metricLufs').textContent = formatMetric(metrics.integrated_lufs, ' LUFS');
     $('metricPeak').textContent = formatMetric(metrics.estimated_true_peak_dbtp, ' dBTP');
     $('metricPlr').textContent = formatMetric(metrics.peak_to_loudness_ratio, ' dB');
@@ -623,10 +629,11 @@ JS_APP = """\
     updateBands(metrics.band_energy || {});
   }
 
-  function resetMetrics() {
-    ['metricPeak','metricPlr','metricStereo','metricDc','metricClipping','metricLowWidth','metricHarsh'].forEach(id => $(id).textContent = 'Not measured yet');
-    $('metricLufs').textContent = 'Pending analysis';
-    $('metricReadiness').textContent = 'Available after processing';
+  function resetMetrics(message) {
+    const value = message || 'Not measured yet';
+    ['metricPeak','metricPlr','metricStereo','metricDc','metricClipping','metricLowWidth','metricHarsh'].forEach(id => $(id).textContent = value);
+    $('metricLufs').textContent = message || 'Pending analysis';
+    $('metricReadiness').textContent = message || 'Available after processing';
     $('lufsMeterFill').style.width = '0%';
     updateBands({});
   }
@@ -774,6 +781,7 @@ HTML_TEMPLATE = """\
       <button class="mode-button active" data-mode="safe_master" type="button">Safe Master</button>
       <button class="mode-button" data-mode="naturalize" type="button">Naturalize Pass</button>
       <button class="mode-button" data-mode="full_release" type="button">Full Release Pass</button>
+      <button class="mode-button" data-mode="legacy_sanitize" type="button">Legacy GPU Clean</button>
     </div>
     <div class="control-grid">
       <label>Output format
@@ -814,7 +822,7 @@ HTML_TEMPLATE = """\
         </select>
       </label>
       <label class="advanced-toggle">Advanced legacy clean
-        <span><input type="checkbox" id="paranoidToggle"> Paranoid/GPU compatibility</span>
+        <span><input type="checkbox" id="paranoidToggle"> Aggressive legacy profile</span>
       </label>
     </div>
     <div class="action-row">
@@ -1270,22 +1278,21 @@ def _process_upload_job(
             download_name = f"{stem}_{suffix}{ext}"
             token = _register_download(app, output_path, download_name)
 
+        final_steps = result.get("timeline_steps")
+        if not final_steps:
+            final_steps = (
+                ["upload", "metadata", "loudness", "dc", "spectrum", "render", "limit", "report"]
+                if mode in QUALITY_MODES
+                else ["upload", "metadata", "render", "report"]
+            )
+
         _update_job(
             app,
             job_id,
             status="complete",
             progress=100,
             message="Processing complete.",
-            processing_steps=[
-                "upload",
-                "metadata",
-                "loudness",
-                "dc",
-                "spectrum",
-                "render",
-                "limit",
-                "report",
-            ],
+            processing_steps=final_steps,
             result={
                 "success": True,
                 "engine_version": ENGINE_VERSION,
@@ -1299,7 +1306,7 @@ def _process_upload_job(
                 "metrics_after": result.get("metrics_after"),
                 "waveform_artifact": result.get("waveform_artifact"),
                 "report_artifacts": result.get("report_artifacts", {}),
-                "processing_steps": result.get("processing_steps", []),
+                "processing_steps": final_steps,
                 "preview_protected": result.get("preview_protected"),
                 "peak_safety": result.get("peak_safety"),
             },
@@ -1479,6 +1486,11 @@ def _process_quality_job(
     }
 
     output_file = None if mode == "analyze_only" else str(output_path)
+    timeline_steps = (
+        ["upload", "metadata", "loudness", "dc", "spectrum", "report"]
+        if mode == "analyze_only"
+        else ["upload", "metadata", "loudness", "dc", "spectrum", "render", "limit", "report"]
+    )
     return {
         "success": True,
         "output_file": output_file,
@@ -1493,6 +1505,7 @@ def _process_quality_job(
             "html_download_token": html_token,
         },
         "processing_steps": report.get("processing_steps", []),
+        "timeline_steps": timeline_steps,
         "preview_protected": mode != "analyze_only",
         "peak_safety": "Protected" if mode != "analyze_only" else "Analysis only",
     }

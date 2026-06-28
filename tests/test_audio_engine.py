@@ -149,6 +149,20 @@ def test_web_ui_renders_audio_quality_console():
     assert "Release-Ready Stereo Mastering" in html
     assert "ENGINE ACTIVE" in html
     assert "Analyze &amp; Master" in html
+    assert "Legacy GPU Clean" in html
+    assert "Aggressive legacy profile" in html
+
+
+def test_web_ui_keeps_quality_mode_when_legacy_profile_checked():
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+
+    response = client.get("/")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "const mode = selectedMode;" in html
+    assert "paranoid ? 'legacy_sanitize' : selectedMode" not in html
 
 
 def test_web_status_exposes_quality_engine_schema():
