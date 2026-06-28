@@ -262,12 +262,18 @@ JS_APP = """\
     result.hidden = false;
     $('resultText').textContent = 'File sanitized successfully!';
     const stats = data.stats || {};
-    $('statsPanel').innerHTML =
-      '<div class="stat-row"><span class="stat-label">Engine</span><span class="stat-value">' + (stats.processing_engine || 'N/A') + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">GPU</span><span class="stat-value">' + (stats.gpu_acceleration ? (stats.gpu_device || 'Enabled') : 'Fallback/CPU') + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Metadata removed</span><span class="stat-value">' + (stats.metadata_removed || 0) + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Processing time</span><span class="stat-value">' + formatTime(stats.processing_time) + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Speed</span><span class="stat-value">' + (stats.processing_speed || 'N/A') + '</span></div>';
+    const rows = [
+      statRow('Engine', stats.processing_engine || 'N/A'),
+      statRow('GPU', stats.gpu_acceleration ? (stats.gpu_device || 'Enabled') : 'Fallback/CPU'),
+      statRow('Signal changed', formatBool(stats.signal_changed)),
+      statRow('Signal delta', formatSignalDelta(stats.signal_delta_ratio, stats.signal_delta_db)),
+      statRow('Hash changed', formatBool(stats.output_hash_changed)),
+      statRow('Metadata clean', formatBool(stats.metadata_clean)),
+      statRow('Metadata removed', stats.metadata_removed || 0),
+      statRow('Processing time', formatTime(stats.processing_time)),
+      statRow('Speed', stats.processing_speed || 'N/A'),
+    ];
+    $('statsPanel').innerHTML = rows.join('');
     $('downloadLink').href = '/api/download/' + data.download_token;
     $('downloadLink').download = data.filename || 'cleaned_audio';
   }
@@ -303,6 +309,29 @@ JS_APP = """\
   function formatTime(s) {
     if (s == null) return 'N/A';
     return parseFloat(s).toFixed(1) + 's';
+  }
+  function formatSignalDelta(ratio, db) {
+    if (ratio == null) return 'N/A';
+    const percent = (parseFloat(ratio) * 100).toFixed(4) + '%';
+    if (db == null) return percent;
+    return percent + ' (' + parseFloat(db).toFixed(1) + ' dB)';
+  }
+  function formatBool(value) {
+    if (value === true) return 'yes';
+    if (value === false) return 'no';
+    return 'N/A';
+  }
+  function statRow(label, value) {
+    return '<div class="stat-row"><span class="stat-label">' + escapeHtml(label) +
+      '</span><span class="stat-value">' + escapeHtml(String(value)) + '</span></div>';
+  }
+  function escapeHtml(value) {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 })();
 """

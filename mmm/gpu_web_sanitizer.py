@@ -9,6 +9,7 @@ conservative for small NVIDIA cards such as the GTX 1060 3GB.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import time
 from pathlib import Path
@@ -21,6 +22,8 @@ import soundfile as sf
 
 DEFAULT_GPU_CHUNK_SECONDS = 20.0
 DEFAULT_GPU_OVERLAP_SECONDS = 0.25
+MIN_SIGNAL_RMS_FOR_DELTA_CHECK = 1e-6
+MIN_SIGNAL_DELTA_RATIO = 1e-4
 
 
 def cuda_available() -> bool:
@@ -66,6 +69,7 @@ def gpu_web_sanitize(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     start_time = time.time()
+    input_hash = _sha256_file(input_path)
     audio, sr = _load_audio(input_path)
     duration = audio.shape[0] / sr if sr else 0.0
 
@@ -81,8 +85,32 @@ def gpu_web_sanitize(
         paranoid_mode=paranoid_mode,
         chunk_seconds=chunk_seconds,
     )
+    buffer_verification = _verify_signal_delta(audio, processed)
+    if not buffer_verification["signal_changed"]:
+        raise RuntimeError(
+            "GPU processing produced too little signal change "
+            f"(delta ratio {buffer_verification['signal_delta_ratio']:.8f})"
+        )
 
     _write_audio(processed, sr, output_path)
+    output_hash = _sha256_file(output_path)
+    if output_hash == input_hash:
+        raise RuntimeError("GPU processing wrote a byte-identical output file")
+    output_audio, output_sr = _load_audio(output_path)
+    if output_sr != sr:
+        raise RuntimeError(
+            f"GPU output sample rate changed unexpectedly ({sr} -> {output_sr})"
+        )
+    output_verification = _verify_signal_delta(audio, output_audio)
+    if not output_verification["signal_changed"]:
+        raise RuntimeError(
+            "Written GPU output produced too little signal change "
+            f"(delta ratio {output_verification['signal_delta_ratio']:.8f})"
+        )
+    metadata_clean = _metadata_clean(output_path)
+    if not metadata_clean:
+        raise RuntimeError("GPU output still contains metadata tags")
+
     total_time = time.time() - start_time
 
     return {
@@ -99,6 +127,13 @@ def gpu_web_sanitize(
             "gpu_device": gpu_name,
             "gpu_chunks_processed": chunks_processed,
             "gpu_chunk_seconds": chunk_seconds,
+            "input_sha256": input_hash,
+            "output_sha256": output_hash,
+            "output_hash_changed": True,
+            "metadata_clean": metadata_clean,
+            "gpu_buffer_signal_delta_ratio": buffer_verification["signal_delta_ratio"],
+            "gpu_buffer_signal_delta_db": buffer_verification["signal_delta_db"],
+            **output_verification,
         },
     }
 
@@ -210,14 +245,18 @@ def _process_chunk_torch(
     nyquist = max(sr / 2, 1.0)
     freq_weight = torch.clamp(freqs / nyquist, 0, 1) ** 1.5
 
-    base = 0.00035 if not paranoid_mode else 0.0007
-    high = 0.0016 if not paranoid_mode else 0.0032
+    base = 0.0012 if not paranoid_mode else 0.0025
+    high = 0.0060 if not paranoid_mode else 0.0120
     jitter_std = base + high * freq_weight
     jitter_std = jitter_std[:, None]
 
     # Extra high-frequency decorrelation where watermark-like energy usually lives.
     hf_mask = (freqs >= 14_000)[:, None]
-    jitter_std = torch.where(hf_mask, jitter_std * (1.8 if paranoid_mode else 1.35), jitter_std)
+    jitter_std = torch.where(
+        hf_mask,
+        jitter_std * (2.2 if paranoid_mode else 1.6),
+        jitter_std,
+    )
     jitter_std[0, :] = 0.0
 
     phase_noise = torch.randn_like(phase) * jitter_std
@@ -225,8 +264,10 @@ def _process_chunk_torch(
     y = torch.fft.irfft(modified, n=centered.shape[0], dim=0)
 
     # Blend with the original and restore RMS to keep the result stable.
-    blend = 0.28 if paranoid_mode else 0.18
+    blend = 0.45 if paranoid_mode else 0.30
     y = (1.0 - blend) * x + blend * y
+    dither_level = 2e-6 if not paranoid_mode else 5e-6
+    y = y + torch.randn_like(y) * dither_level
     new_rms = torch.sqrt(torch.mean(y * y, dim=0, keepdim=True)).clamp_min(1e-8)
     y = y * (original_rms / new_rms)
 
@@ -292,3 +333,69 @@ def _write_audio(audio: np.ndarray, sr: int, output_path: Path) -> None:
         sf.write(str(output_path), audio_int16, sr, format="FLAC")
     else:
         sf.write(str(output_path), audio_int16, sr, format=sf_format, subtype="PCM_16")
+
+
+def _verify_signal_delta(original: np.ndarray, processed: np.ndarray) -> Dict[str, Any]:
+    """Return signal-level verification metrics for the GPU pass."""
+    original = np.asarray(original, dtype=np.float32)
+    processed = np.asarray(processed, dtype=np.float32)
+    if original.ndim == 1:
+        original = original[:, None]
+    if processed.ndim == 1:
+        processed = processed[:, None]
+
+    frames = min(original.shape[0], processed.shape[0])
+    channels = min(original.shape[1], processed.shape[1])
+    if frames == 0 or channels == 0:
+        return {
+            "signal_changed": False,
+            "signal_delta_rms": 0.0,
+            "signal_delta_ratio": 0.0,
+            "signal_delta_db": None,
+            "signal_max_abs_delta": 0.0,
+            "source_rms": 0.0,
+        }
+
+    original_view = original[:frames, :channels]
+    processed_view = processed[:frames, :channels]
+    delta = processed_view - original_view
+
+    source_rms = float(np.sqrt(np.mean(original_view * original_view)))
+    delta_rms = float(np.sqrt(np.mean(delta * delta)))
+    max_abs_delta = float(np.max(np.abs(delta))) if delta.size else 0.0
+    delta_ratio = delta_rms / max(source_rms, 1e-12)
+    delta_db = (
+        20.0 * float(np.log10(max(delta_ratio, 1e-12)))
+        if source_rms >= MIN_SIGNAL_RMS_FOR_DELTA_CHECK
+        else None
+    )
+    low_signal = source_rms < MIN_SIGNAL_RMS_FOR_DELTA_CHECK
+    signal_changed = max_abs_delta > 0.0 if low_signal else delta_ratio >= MIN_SIGNAL_DELTA_RATIO
+
+    return {
+        "signal_changed": bool(signal_changed),
+        "signal_delta_required": not low_signal,
+        "signal_delta_rms": delta_rms,
+        "signal_delta_ratio": delta_ratio,
+        "signal_delta_db": delta_db,
+        "signal_max_abs_delta": max_abs_delta,
+        "source_rms": source_rms,
+    }
+
+
+def _metadata_clean(file_path: Path) -> bool:
+    from mutagen import File as MutagenFile
+
+    audio_file = MutagenFile(file_path)
+    if audio_file is None:
+        raise RuntimeError(f"Unable to inspect metadata for {file_path}")
+    tags = getattr(audio_file, "tags", None)
+    return not bool(tags)
+
+
+def _sha256_file(file_path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 import mmm.cli as cli_module
 import mmm.core.audio_sanitizer as audio_sanitizer_module
+import mmm.gpu_web_sanitizer as gpu_web_module
 import mmm.server as server_module
 import mmm.turbo_analysis as turbo_analysis_module
 from mmm.cli import cli
@@ -19,6 +20,7 @@ from mmm.config.config_manager import ConfigManager
 from mmm.config.defaults import DEFAULT_CONFIG
 from mmm.core.audio_sanitizer import AudioSanitizer
 from mmm.detection.metadata_scanner import MetadataScanner
+from mmm.gpu_web_sanitizer import _verify_signal_delta
 from mmm.optimized_processor import OptimizedAudioProcessor
 from mmm.preserving_sanitizer import preserving_sanitize
 from mmm.server import create_app
@@ -426,6 +428,71 @@ def _wait_for_job(client, job_id, timeout=2.0):
             return response
         time.sleep(0.02)
     raise AssertionError(f"job did not finish: {last_payload}")
+
+
+def test_gpu_signal_delta_rejects_unchanged_audio():
+    audio = np.full((2000, 2), 0.2, dtype=np.float32)
+
+    metrics = _verify_signal_delta(audio, audio.copy())
+
+    assert metrics["signal_changed"] is False
+    assert metrics["signal_delta_ratio"] == 0.0
+
+
+def test_gpu_signal_delta_rejects_unchanged_silence():
+    audio = np.zeros((2000, 2), dtype=np.float32)
+
+    metrics = _verify_signal_delta(audio, audio.copy())
+
+    assert metrics["signal_changed"] is False
+    assert metrics["signal_delta_required"] is False
+
+
+def test_gpu_signal_delta_accepts_material_change():
+    audio = np.full((2000, 2), 0.2, dtype=np.float32)
+    processed = audio.copy()
+    processed[::2] += 1e-3
+
+    metrics = _verify_signal_delta(audio, processed)
+
+    assert metrics["signal_changed"] is True
+    assert metrics["signal_delta_ratio"] >= 1e-4
+
+
+def test_gpu_web_sanitize_rejects_unchanged_written_output(monkeypatch, tmp_path):
+    input_file = tmp_path / "input.wav"
+    input_file.write_bytes(b"input")
+    original = np.full((2000, 1), 0.2, dtype=np.float32)
+    processed = original.copy()
+    processed[::2] += 1e-3
+
+    monkeypatch.setattr(gpu_web_module, "cuda_available", lambda: True)
+    monkeypatch.setattr(
+        gpu_web_module,
+        "_process_audio_on_gpu",
+        lambda *_args, **_kwargs: (processed, 1, "test-gpu"),
+    )
+    monkeypatch.setattr(
+        gpu_web_module,
+        "_sha256_file",
+        lambda path: "input-hash" if Path(path) == input_file else "output-hash",
+    )
+    monkeypatch.setattr(
+        gpu_web_module,
+        "_write_audio",
+        lambda _audio, _sr, output_path: Path(output_path).write_bytes(b"output"),
+    )
+    monkeypatch.setattr(gpu_web_module, "_metadata_clean", lambda _path: True)
+
+    def fake_load_audio(path):
+        if Path(path) == input_file:
+            return original.copy(), 8000
+        return original.copy(), 8000
+
+    monkeypatch.setattr(gpu_web_module, "_load_audio", fake_load_audio)
+
+    with pytest.raises(RuntimeError, match="Written GPU output"):
+        gpu_web_module.gpu_web_sanitize(input_file, verbose=False)
 
 
 def test_server_upload_runs_gpu_background_job(monkeypatch):
