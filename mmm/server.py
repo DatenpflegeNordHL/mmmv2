@@ -77,37 +77,52 @@ body::after{
 }
 [hidden]{display:none!important}
 .app-shell{
-  width:min(100%,760px);min-height:100vh;padding:clamp(1rem,3vw,2.6rem);
+  width:min(100%,760px);min-height:100vh;padding:clamp(.85rem,2.2vw,1.8rem);
   display:flex;flex-direction:column;position:relative;z-index:1;
 }
-header{text-align:center;padding:1.3rem 0 .9rem}
-.title-row{display:inline-flex;align-items:flex-start;justify-content:center;gap:.8rem;position:relative}
+.hero-header{
+  position:relative;text-align:center;margin:0 auto clamp(1rem,2.2vw,1.55rem);
+  max-width:min(92vw,760px);padding:clamp(.55rem,1.6vw,1rem) 0 0;
+}
+.title-lockup{
+  position:relative;display:inline-flex;align-items:flex-start;justify-content:center;
+  gap:clamp(.55rem,1.3vw,.95rem);
+}
 .hero-title{
-  font-size:clamp(2.35rem,8vw,5.1rem);line-height:.92;font-weight:900;
-  letter-spacing:0;text-transform:uppercase;
-  color:#fff;
+  margin:0;display:flex;flex-direction:column;align-items:center;
+  font-size:clamp(2.7rem,5.25vw,4.45rem);line-height:.9;font-weight:900;
+  letter-spacing:.025em;text-transform:uppercase;color:#f8fbff;
   text-shadow:
-    0 0 5px rgba(255,255,255,.85),
-    0 0 16px rgba(52,247,255,.82),
-    0 0 34px rgba(255,61,242,.72),
-    0 0 66px rgba(140,82,255,.55);
+    0 0 6px rgba(116,220,255,.68),
+    0 0 16px rgba(180,92,255,.38),
+    0 0 30px rgba(255,64,214,.18);
 }
+.hero-title span{display:block;white-space:nowrap}
 .version-sign{
-  margin-top:.2rem;padding:.22rem .5rem;border:1px solid var(--cyan);
-  border-radius:7px;background:rgba(8,5,20,.74);color:#fff;font-weight:900;
-  font-size:clamp(.82rem,2vw,1rem);line-height:1;letter-spacing:.05em;
-  box-shadow:0 0 10px rgba(52,247,255,.75),inset 0 0 10px rgba(255,61,242,.28);
-  text-shadow:0 0 7px var(--cyan),0 0 12px var(--magenta);
-  transform:rotate(4deg);position:relative;
+  position:relative;flex:0 0 auto;margin-top:clamp(.16rem,.55vw,.42rem);
+  padding:.24rem .56rem;border:2px solid rgba(94,234,255,.95);
+  border-radius:.48rem;background:linear-gradient(180deg,rgba(20,31,58,.88),rgba(17,17,38,.9));
+  color:#fff;font-size:clamp(.82rem,1.18vw,1.02rem);font-weight:900;
+  letter-spacing:.06em;line-height:1;text-shadow:
+    0 0 5px rgba(255,92,231,.88),
+    0 0 12px rgba(94,234,255,.74);
+  box-shadow:
+    0 0 9px rgba(94,234,255,.58),
+    0 0 18px rgba(255,64,214,.24),
+    inset 0 0 9px rgba(94,234,255,.16);
+  transform:rotate(2deg);
 }
-.version-sign::before{
-  content:"";position:absolute;left:50%;top:-17px;width:1px;height:17px;
-  background:linear-gradient(var(--magenta),var(--cyan));
-  box-shadow:0 0 8px var(--cyan);
+.version-sign::before,.version-sign::after{
+  content:"";position:absolute;top:-1.05rem;width:1px;height:.95rem;
+  background:linear-gradient(to bottom,rgba(94,234,255,.82),transparent);
+  box-shadow:0 0 7px rgba(94,234,255,.58);
 }
-header .subtitle{
-  color:var(--muted);font-size:clamp(.98rem,2.4vw,1.12rem);margin-top:.75rem;
-  text-shadow:0 0 12px rgba(52,247,255,.35);
+.version-sign::before{left:24%}
+.version-sign::after{right:24%}
+.hero-subtitle{
+  margin:clamp(.78rem,1.35vw,1.05rem) 0 0;color:rgba(220,230,255,.78);
+  font-size:clamp(.98rem,1.45vw,1.18rem);font-weight:500;
+  text-shadow:0 0 10px rgba(94,234,255,.22);
 }
 main{
   width:100%;padding:clamp(.75rem,2vw,1rem);
@@ -226,8 +241,11 @@ footer.footer-credits .credit-secondary{color:#7f7598}
 @media (max-width:560px){
   .app-shell{padding:.8rem}
   main{border-radius:20px;padding:.8rem}
-  .title-row{gap:.45rem}
-  .version-sign{transform:rotate(3deg);padding:.18rem .42rem}
+  .hero-header{margin-bottom:1rem;padding-top:.45rem}
+  .title-lockup{gap:.5rem}
+  .hero-title{font-size:clamp(2.25rem,11.2vw,3.35rem)}
+  .hero-title span{white-space:normal}
+  .version-sign{margin-top:.12rem;font-size:.78rem;padding:.2rem .43rem;transform:rotate(2deg)}
   .legal-panel{font-size:.76rem}
   .option-group{align-items:flex-start;flex-direction:column;gap:.35rem}
 }
@@ -465,12 +483,15 @@ HTML_TEMPLATE = """\
 </head>
 <body data-max-size="{max_size}">
 <div class="app-shell">
-<header>
-  <div class="title-row">
-    <h1 class="hero-title">Melodic Metadata Massacrer</h1>
+<header class="hero-header">
+  <div class="title-lockup">
+    <h1 class="hero-title" aria-label="Melodic Metadata Massacrer">
+      <span>Melodic Metadata</span>
+      <span>Massacrer</span>
+    </h1>
     <span class="version-sign" aria-label="Version 2.0">2.0</span>
   </div>
-  <p class="subtitle">Browser-based audio sanitizer</p>
+  <p class="hero-subtitle">Browser-based audio sanitizer</p>
 </header>
 <main>
   <div class="legal-panel">
