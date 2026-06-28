@@ -34,89 +34,203 @@ DEFAULT_STALE_AGE: int = 3600  # 1 hour
 
 CSS_STYLES = """\
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;
-  background:#0d1117;color:#c9d1d9;min-height:100vh;
-  display:flex;flex-direction:column;align-items:center;
+:root{
+  --bg:#080514;
+  --panel:#130c2a;
+  --panel-soft:rgba(16,11,35,.76);
+  --text:#f7f0ff;
+  --muted:#beb4d7;
+  --cyan:#34f7ff;
+  --magenta:#ff3df2;
+  --purple:#8c52ff;
+  --amber:#ffb342;
+  --red:#ff365d;
+  --green:#58ffb5;
+  --border:rgba(52,247,255,.42);
 }
-header{text-align:center;padding:2rem 1rem 0.5rem}
-header h1{font-size:1.6rem;color:#58a6ff}
-header .subtitle{color:#8b949e;font-size:0.9rem;margin-top:0.3rem}
-main{width:100%;max-width:560px;padding:1rem}
-.warning-banner{
-  background:#1c1208;border:1px solid #d29922;border-radius:6px;
-  padding:0.7rem 1rem;font-size:0.75rem;color:#d29922;
-  margin-bottom:1.2rem;line-height:1.4;
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+  background:
+    radial-gradient(circle at 50% 38%,rgba(255,92,0,.28) 0 7%,transparent 7.5%),
+    radial-gradient(circle at 18% 10%,rgba(255,61,242,.20),transparent 31%),
+    radial-gradient(circle at 82% 4%,rgba(52,247,255,.18),transparent 26%),
+    linear-gradient(180deg,#14082d 0%,#090617 48%,#05030d 100%);
+  color:var(--text);min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;
+  overflow-x:hidden;position:relative;
+}
+body::before{
+  content:"";position:fixed;inset:45% -10% 0;pointer-events:none;opacity:.42;
+  background:
+    linear-gradient(rgba(52,247,255,.35) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,61,242,.28) 1px,transparent 1px);
+  background-size:100% 32px,72px 100%;
+  transform:perspective(440px) rotateX(63deg);transform-origin:top center;
+  filter:drop-shadow(0 0 12px rgba(52,247,255,.22));
+}
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;
+  background:
+    linear-gradient(transparent 0 96%,rgba(255,255,255,.035) 97%),
+    radial-gradient(ellipse at 50% 54%,rgba(255,179,66,.14),transparent 29%);
+  background-size:100% 5px,100% 100%;mix-blend-mode:screen;opacity:.44;
+}
+[hidden]{display:none!important}
+.app-shell{
+  width:min(100%,760px);min-height:100vh;padding:clamp(1rem,3vw,2.6rem);
+  display:flex;flex-direction:column;position:relative;z-index:1;
+}
+header{text-align:center;padding:1.3rem 0 .9rem}
+.title-row{display:inline-flex;align-items:flex-start;justify-content:center;gap:.8rem;position:relative}
+.hero-title{
+  font-size:clamp(2.35rem,8vw,5.1rem);line-height:.92;font-weight:900;
+  letter-spacing:0;text-transform:uppercase;
+  color:#fff;
+  text-shadow:
+    0 0 5px rgba(255,255,255,.85),
+    0 0 16px rgba(52,247,255,.82),
+    0 0 34px rgba(255,61,242,.72),
+    0 0 66px rgba(140,82,255,.55);
+}
+.version-sign{
+  margin-top:.2rem;padding:.22rem .5rem;border:1px solid var(--cyan);
+  border-radius:7px;background:rgba(8,5,20,.74);color:#fff;font-weight:900;
+  font-size:clamp(.82rem,2vw,1rem);line-height:1;letter-spacing:.05em;
+  box-shadow:0 0 10px rgba(52,247,255,.75),inset 0 0 10px rgba(255,61,242,.28);
+  text-shadow:0 0 7px var(--cyan),0 0 12px var(--magenta);
+  transform:rotate(4deg);position:relative;
+}
+.version-sign::before{
+  content:"";position:absolute;left:50%;top:-17px;width:1px;height:17px;
+  background:linear-gradient(var(--magenta),var(--cyan));
+  box-shadow:0 0 8px var(--cyan);
+}
+header .subtitle{
+  color:var(--muted);font-size:clamp(.98rem,2.4vw,1.12rem);margin-top:.75rem;
+  text-shadow:0 0 12px rgba(52,247,255,.35);
+}
+main{
+  width:100%;padding:clamp(.75rem,2vw,1rem);
+  background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.018));
+  border:1px solid rgba(255,255,255,.09);border-radius:28px;
+  box-shadow:0 26px 80px rgba(0,0,0,.44),0 0 70px rgba(140,82,255,.16);
+  backdrop-filter:blur(12px);
+}
+.legal-panel{
+  display:flex;gap:.8rem;align-items:flex-start;
+  background:linear-gradient(135deg,rgba(45,22,6,.84),rgba(18,10,24,.82));
+  border:1px solid rgba(255,179,66,.82);border-radius:16px;
+  padding:.95rem 1rem;font-size:.82rem;color:#ffe0a6;
+  margin-bottom:1.05rem;line-height:1.45;
+  box-shadow:0 0 22px rgba(255,179,66,.22),inset 0 0 20px rgba(255,179,66,.08);
+}
+.legal-icon{
+  flex:0 0 auto;color:var(--amber);filter:drop-shadow(0 0 8px rgba(255,179,66,.8));
 }
 .dropzone{
-  border:2px dashed #30363d;border-radius:10px;padding:3rem 1rem;
-  text-align:center;cursor:pointer;transition:border-color .2s,background .2s;
+  border:2px dashed rgba(52,247,255,.72);border-radius:24px;
+  padding:clamp(2.4rem,7vw,4.5rem) 1rem;text-align:center;cursor:pointer;
+  transition:border-color .2s,box-shadow .2s,background .2s,transform .2s;
+  background:radial-gradient(circle at 50% 0%,rgba(52,247,255,.14),transparent 44%),rgba(9,7,24,.72);
+  box-shadow:0 0 0 1px rgba(255,61,242,.22),inset 0 0 34px rgba(52,247,255,.09),0 0 42px rgba(52,247,255,.12);
 }
-.dropzone:hover,.dropzone.dragover{border-color:#58a6ff;background:#161b22}
-.dropzone-icon{font-size:2.5rem;margin-bottom:0.5rem}
-.dropzone p{color:#8b949e;font-size:0.9rem}
-.dropzone .hint{font-size:0.75rem;margin-top:0.3rem}
-.dropzone .filename{color:#58a6ff;font-weight:600;margin-top:0.6rem;word-break:break-all}
+.dropzone:hover,.dropzone.dragover{
+  border-color:var(--magenta);background:radial-gradient(circle at 50% 0%,rgba(255,61,242,.18),transparent 44%),rgba(13,8,34,.82);
+  box-shadow:0 0 0 1px rgba(52,247,255,.34),inset 0 0 44px rgba(255,61,242,.11),0 0 58px rgba(255,61,242,.24);
+  transform:translateY(-1px);
+}
+.dropzone-icon{
+  font-size:3.25rem;margin-bottom:.7rem;color:var(--cyan);
+  text-shadow:0 0 8px #fff,0 0 18px var(--cyan),0 0 32px var(--magenta);
+}
+.dropzone p{color:#f4edff;font-size:1rem;font-weight:700}
+.dropzone .hint{font-size:.82rem;margin-top:.45rem;color:var(--muted);font-weight:500}
+.dropzone .filename{
+  color:var(--cyan);font-weight:800;margin-top:.85rem;word-break:break-all;
+  text-shadow:0 0 12px rgba(52,247,255,.7);
+}
 .options-panel{
-  background:#161b22;border:1px solid #30363d;border-radius:8px;
-  padding:1rem;margin-top:1rem;
+  background:var(--panel-soft);border:1px solid rgba(52,247,255,.25);
+  border-radius:18px;padding:1rem;margin-top:1rem;
+  box-shadow:inset 0 0 24px rgba(140,82,255,.11);
 }
 .option-group{display:flex;align-items:center;gap:0.6rem;margin-bottom:0.8rem}
-.option-group label{color:#8b949e;font-size:0.85rem;min-width:110px}
+.option-group label{color:var(--muted);font-size:0.85rem;min-width:110px}
 .option-group select{
-  background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
-  border-radius:4px;padding:0.3rem 0.5rem;font-size:0.85rem;
+  background:#080514;color:var(--text);border:1px solid rgba(52,247,255,.36);
+  border-radius:8px;padding:0.42rem 0.55rem;font-size:0.85rem;
 }
-.option-group input[type=checkbox]{accent-color:#58a6ff}
-.toggle-label{color:#8b949e;font-size:0.8rem}
+.option-group input[type=checkbox]{accent-color:var(--magenta)}
+.toggle-label{color:var(--muted);font-size:0.8rem}
 .btn-primary{
   display:block;width:100%;padding:0.7rem;margin-top:0.5rem;
-  background:#238636;color:#fff;border:none;border-radius:6px;
-  font-size:0.95rem;font-weight:600;cursor:pointer;transition:background .2s;
+  background:linear-gradient(90deg,var(--cyan),var(--magenta));color:#fff;
+  border:none;border-radius:999px;font-size:0.95rem;font-weight:800;
+  cursor:pointer;transition:filter .2s,transform .2s;
+  box-shadow:0 0 24px rgba(52,247,255,.28),0 0 24px rgba(255,61,242,.18);
 }
-.btn-primary:hover{background:#2ea043}
-.btn-primary:disabled{background:#21262d;color:#484f58;cursor:not-allowed}
+.btn-primary:hover{filter:brightness(1.12);transform:translateY(-1px)}
+.btn-primary:disabled{background:#211a32;color:#7c728f;cursor:not-allowed;box-shadow:none}
 .status-area{text-align:center;margin-top:1.5rem}
 .spinner{
-  width:36px;height:36px;border:3px solid #30363d;border-top-color:#58a6ff;
+  width:36px;height:36px;border:3px solid rgba(52,247,255,.2);border-top-color:var(--cyan);
   border-radius:50%;margin:0 auto 0.8rem;animation:spin .8s linear infinite;
+  box-shadow:0 0 16px rgba(52,247,255,.5);
 }
 @keyframes spin{to{transform:rotate(360deg)}}
-#statusText{color:#8b949e;font-size:0.9rem}
+#statusText{color:var(--muted);font-size:0.9rem}
 .progress-bar{
-  width:100%;height:6px;background:#21262d;border-radius:3px;
+  width:100%;height:7px;background:#171127;border-radius:999px;
   margin-top:0.8rem;overflow:hidden;
 }
 .progress-fill{
-  height:100%;background:#58a6ff;border-radius:3px;
+  height:100%;background:linear-gradient(90deg,var(--cyan),var(--magenta));border-radius:999px;
   transition:width .3s;width:0%;
 }
 .result-area{text-align:center;margin-top:1.5rem}
 .success-icon{font-size:2rem;margin-bottom:0.5rem}
-#resultText{color:#3fb950;font-size:0.95rem;margin-bottom:0.8rem}
+#resultText{color:var(--green);font-size:0.95rem;margin-bottom:0.8rem;text-shadow:0 0 12px rgba(88,255,181,.55)}
 .stats-panel{
-  background:#161b22;border:1px solid #30363d;border-radius:6px;
+  background:var(--panel-soft);border:1px solid rgba(52,247,255,.22);border-radius:14px;
   padding:0.8rem;margin-bottom:1rem;text-align:left;font-size:0.8rem;
 }
 .stats-panel .stat-row{display:flex;justify-content:space-between;padding:0.2rem 0}
-.stats-panel .stat-label{color:#8b949e}
-.stats-panel .stat-value{color:#c9d1d9;font-weight:500}
+.stats-panel .stat-label{color:var(--muted)}
+.stats-panel .stat-value{color:var(--text);font-weight:600}
 .btn-download{
-  display:inline-block;padding:0.6rem 1.5rem;background:#1f6feb;color:#fff;
-  border-radius:6px;text-decoration:none;font-weight:600;font-size:0.9rem;
-  transition:background .2s;
+  display:inline-block;padding:0.65rem 1.55rem;background:linear-gradient(90deg,var(--cyan),var(--purple));color:#fff;
+  border-radius:999px;text-decoration:none;font-weight:800;font-size:0.9rem;
+  transition:filter .2s;box-shadow:0 0 20px rgba(52,247,255,.24);
 }
-.btn-download:hover{background:#388bfd}
+.btn-download:hover{filter:brightness(1.12)}
 .btn-secondary{
   display:inline-block;padding:0.5rem 1.2rem;margin-top:0.8rem;
-  background:transparent;color:#8b949e;border:1px solid #30363d;
-  border-radius:6px;font-size:0.85rem;cursor:pointer;transition:border-color .2s;
+  background:rgba(8,5,20,.4);color:var(--muted);border:1px solid rgba(52,247,255,.34);
+  border-radius:999px;font-size:0.85rem;cursor:pointer;transition:border-color .2s,color .2s,box-shadow .2s;
 }
-.btn-secondary:hover{border-color:#58a6ff;color:#58a6ff}
+.btn-secondary:hover{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 18px rgba(52,247,255,.25)}
 .error-area{text-align:center;margin-top:1.5rem}
-.error-icon{font-size:2rem;margin-bottom:0.5rem}
-#errorText{color:#f85149;font-size:0.9rem;margin-bottom:0.8rem}
-footer{margin-top:auto;padding:1.5rem;text-align:center;color:#484f58;font-size:0.7rem}
+.error-state{padding:1rem;border-radius:18px;background:rgba(31,4,18,.44);border:1px solid rgba(255,54,93,.38);box-shadow:0 0 28px rgba(255,54,93,.13)}
+.error-icon{
+  font-size:2.5rem;margin-bottom:0.5rem;color:var(--red);
+  text-shadow:0 0 7px #fff,0 0 18px var(--red),0 0 32px rgba(255,54,93,.72);
+}
+#errorText{color:var(--red);font-size:1rem;font-weight:800;margin-bottom:0.8rem;text-shadow:0 0 12px rgba(255,54,93,.55)}
+.retry-button{border-color:rgba(255,54,93,.72);color:#ffd7df;box-shadow:0 0 18px rgba(255,54,93,.18)}
+.retry-button:hover{border-color:var(--red);color:#fff;box-shadow:0 0 24px rgba(255,54,93,.34)}
+footer.footer-credits{
+  margin-top:auto;padding:1.4rem .4rem .2rem;text-align:center;color:#a99fc6;font-size:.78rem;line-height:1.6;
+  text-shadow:0 0 10px rgba(140,82,255,.25);
+}
+footer.footer-credits .credit-secondary{color:#7f7598}
+@media (max-width:560px){
+  .app-shell{padding:.8rem}
+  main{border-radius:20px;padding:.8rem}
+  .title-row{gap:.45rem}
+  .version-sign{transform:rotate(3deg);padding:.18rem .42rem}
+  .legal-panel{font-size:.76rem}
+  .option-group{align-items:flex-start;flex-direction:column;gap:.35rem}
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -350,15 +464,24 @@ HTML_TEMPLATE = """\
 <style>{css}</style>
 </head>
 <body data-max-size="{max_size}">
+<div class="app-shell">
 <header>
-  <h1>Melodic Metadata Massacrer</h1>
-  <p class="subtitle">GPU-assisted browser audio sanitizer</p>
+  <div class="title-row">
+    <h1 class="hero-title">Melodic Metadata Massacrer</h1>
+    <span class="version-sign" aria-label="Version 2.0">2.0</span>
+  </div>
+  <p class="subtitle">Browser-based audio sanitizer</p>
 </header>
 <main>
-  <div class="warning-banner">
-    LEGAL DISCLAIMER: This tool is for AUTHORIZED SECURITY RESEARCH ONLY.
-    Use only on files you own or have explicit permission to modify.
-    You are responsible for compliance with applicable laws.
+  <div class="legal-panel">
+    <svg class="legal-icon" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="currentColor" d="M12 2 1 21h22L12 2Zm0 6.2 5.6 9.8H6.4L12 8.2Zm-.8 2.8h1.6v4.8h-1.6V11Zm0 6.1h1.6v1.6h-1.6v-1.6Z"/>
+    </svg>
+    <p>
+      LEGAL DISCLAIMER: This tool is for AUTHORIZED SECURITY RESEARCH ONLY.
+      Use only on files you own or have explicit permission to modify.
+      You are responsible for compliance with applicable laws.
+    </p>
   </div>
 
   <div id="dropzone" class="dropzone">
@@ -402,13 +525,17 @@ HTML_TEMPLATE = """\
     <button id="resetBtn" class="btn-secondary">Process another file</button>
   </div>
 
-  <div id="error" class="error-area" hidden>
+  <div id="error" class="error-area error-state" hidden>
     <div class="error-icon">&#10060;</div>
     <p id="errorText"></p>
-    <button id="retryBtn" class="btn-secondary">Try again</button>
+    <button id="retryBtn" class="btn-secondary retry-button">Try again</button>
   </div>
 </main>
-<footer>MMM v2.0.0 &mdash; Authorized Security Research Tool</footer>
+<footer class="footer-credits">
+  <div>MMM v2.0.0 — Browser-based audio sanitizer</div>
+  <div class="credit-secondary">Original open-source credit: geeknik/mmm • Retrowave redesign by Dirty D. Noir</div>
+</footer>
+</div>
 <script>{js}</script>
 </body>
 </html>
