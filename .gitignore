@@ -188,3 +188,7 @@ output/
 results/
 reports/
 analysis/
+!audio_engine/analysis/
+!audio_engine/analysis/**
+!audio_engine/reports/
+!audio_engine/reports/**
