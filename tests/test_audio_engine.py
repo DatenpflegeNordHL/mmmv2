@@ -149,8 +149,13 @@ def test_web_ui_renders_audio_quality_console():
     assert "Release-Ready Stereo Mastering" in html
     assert "ENGINE ACTIVE" in html
     assert "Analyze &amp; Master" in html
-    assert "Legacy GPU Clean" in html
-    assert "Aggressive legacy profile" in html
+    assert "Meta Data Clean" in html
+    assert "Aggressive full clean profile" in html
+    assert 'id="waveCanvas"' in html
+    assert 'id="playPreviewBtn"' in html
+    assert 'id="previewAudio"' in html
+    assert "requestAnimationFrame" in html
+    assert "createMediaElementSource" in html
 
 
 def test_web_ui_keeps_quality_mode_when_legacy_profile_checked():
@@ -163,6 +168,7 @@ def test_web_ui_keeps_quality_mode_when_legacy_profile_checked():
     assert response.status_code == 200
     assert "const mode = selectedMode;" in html
     assert "paranoid ? 'legacy_sanitize' : selectedMode" not in html
+    assert "legacy_sanitize: 'Legacy GPU Clean'" not in html
 
 
 def test_web_status_exposes_quality_engine_schema():
@@ -174,6 +180,7 @@ def test_web_status_exposes_quality_engine_schema():
 
     assert response.status_code == 200
     assert payload["engine_version"] == "1.045"
+    assert "metadata_clean" in payload["metadata_modes"]
     assert "safe_master" in payload["quality_modes"]
     assert "streaming_safe" in payload["loudness_targets"]
 
@@ -217,6 +224,134 @@ def test_web_quality_safe_master_job_returns_metrics_and_reports(tmp_path):
     assert result["metrics_after"]["release_readiness"]["score"] >= 0
     assert result["report_artifacts"]["json_download_token"]
     assert result["report_artifacts"]["html_download_token"]
+
+
+def test_web_metadata_clean_job_runs_full_legacy_preserving_profile(monkeypatch, tmp_path):
+    import mmm.preserving_sanitizer as preserving_module
+
+    input_file = _write_stereo_test_file(tmp_path / "input.wav")
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+    expected_methods = [
+        "metadata_clean_export",
+        "spectral_watermark_cleaning",
+        "fingerprint_removal",
+        "hf_noise_and_dither",
+        "humanization",
+        "micro_resample_warp",
+        "analog_warmth",
+        "micro_ambience",
+        "gentle_bandlimit",
+        "phase_swirl",
+        "phase_noise_fft",
+        "dynamic_comb_mask",
+        "transient_micro_shift",
+        "onset_velocity_variation",
+        "long_range_tempo_drift",
+        "mfcc_perturbation",
+        "clarity_tilt",
+    ]
+
+    def fake_preserving_sanitize(input_file, output_file=None, **kwargs):
+        assert kwargs["paranoid_mode"] is True
+        output_path = Path(input_file).with_suffix(".clean.wav")
+        output_path.write_bytes(b"clean")
+        return {
+            "success": True,
+            "output_file": str(output_path),
+            "stats": {
+                "processing_engine": "cpu_preserving",
+                "gpu_acceleration": False,
+                "metadata_clean": True,
+                "methods_used": expected_methods.copy(),
+            },
+        }
+
+    monkeypatch.setattr(preserving_module, "preserving_sanitize", fake_preserving_sanitize)
+
+    with input_file.open("rb") as handle:
+        response = client.post(
+            "/api/upload",
+            data={
+                "file": (handle, "mix.wav"),
+                "format": "preserve",
+                "mode": "metadata_clean",
+                "paranoid": "true",
+            },
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 202
+    job_id = response.get_json()["job_id"]
+    for _ in range(40):
+        job_response = client.get(f"/api/job/{job_id}")
+        payload = job_response.get_json()
+        if payload["status"] == "complete":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"metadata clean job did not complete: {payload}")
+
+    result = payload["result"]
+    stats = result["stats"]
+    assert result["mode"] == "metadata_clean"
+    assert result["download_token"]
+    assert result["metrics_before"] is None
+    assert result["metrics_after"] is None
+    assert stats["processing_engine"] == "metadata_clean_full_legacy"
+    assert stats["gpu_acceleration"] is False
+    assert "strict_metadata_verification" in stats["methods_used"]
+    for method in expected_methods:
+        assert method in stats["methods_used"]
+
+
+def test_web_legacy_sanitize_alias_maps_to_metadata_clean(monkeypatch, tmp_path):
+    import mmm.preserving_sanitizer as preserving_module
+
+    input_file = _write_stereo_test_file(tmp_path / "input.wav")
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+
+    def fake_preserving_sanitize(input_file, output_file=None, **_kwargs):
+        output_path = Path(input_file).with_suffix(".clean.wav")
+        output_path.write_bytes(b"clean")
+        return {
+            "success": True,
+            "output_file": str(output_path),
+            "stats": {
+                "processing_engine": "cpu_preserving",
+                "gpu_acceleration": False,
+                "metadata_clean": True,
+                "methods_used": ["metadata_clean_export", "fingerprint_removal"],
+            },
+        }
+
+    monkeypatch.setattr(preserving_module, "preserving_sanitize", fake_preserving_sanitize)
+
+    with input_file.open("rb") as handle:
+        response = client.post(
+            "/api/upload",
+            data={
+                "file": (handle, "mix.wav"),
+                "format": "preserve",
+                "mode": "legacy_sanitize",
+            },
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 202
+    job_id = response.get_json()["job_id"]
+    for _ in range(40):
+        job_response = client.get(f"/api/job/{job_id}")
+        payload = job_response.get_json()
+        if payload["status"] == "complete":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"legacy alias job did not complete: {payload}")
+
+    assert payload["result"]["mode"] == "metadata_clean"
+    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_full_legacy"
 
 
 def test_web_rejects_unsupported_quality_upload_extension():

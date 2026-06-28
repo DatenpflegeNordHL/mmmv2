@@ -31,6 +31,8 @@ ENGINE_VERSION: str = "1.045"
 QUALITY_MODES: frozenset[str] = frozenset(
     {"analyze_only", "safe_master", "naturalize", "full_release"}
 )
+METADATA_CLEAN_MODE: str = "metadata_clean"
+LEGACY_MODE_ALIASES: frozenset[str] = frozenset({"legacy_sanitize", METADATA_CLEAN_MODE})
 OUTPUT_FORMATS: frozenset[str] = frozenset({"preserve", "mp3", "wav", "flac"})
 LOUDNESS_TARGETS: Dict[str, Dict[str, Union[float, str]]] = {
     "streaming_safe": {"label": "Streaming Safe", "target_lufs": -14.0},
@@ -90,12 +92,12 @@ body::after{
 }
 [hidden]{display:none!important}
 .app-shell{
-  width:min(100%,760px);min-height:100vh;padding:clamp(.85rem,2.2vw,1.8rem);
+  width:min(100%,1040px);min-height:100vh;padding:clamp(.55rem,1.35vw,1.1rem);
   display:flex;flex-direction:column;position:relative;z-index:1;
 }
 .hero-header{
-  position:relative;text-align:center;margin:0 auto clamp(1rem,2.2vw,1.55rem);
-  max-width:min(92vw,760px);padding:clamp(.55rem,1.6vw,1rem) 0 0;
+  position:relative;text-align:center;margin:0 auto clamp(.55rem,1.2vw,1rem);
+  max-width:min(92vw,860px);padding:clamp(.25rem,.8vw,.55rem) 0 0;
 }
 .title-lockup{
   position:relative;display:inline-flex;align-items:flex-start;justify-content:center;
@@ -133,12 +135,12 @@ body::after{
 .version-sign::before{left:24%}
 .version-sign::after{right:24%}
 .hero-subtitle{
-  margin:clamp(.78rem,1.35vw,1.05rem) 0 0;color:rgba(220,230,255,.78);
-  font-size:clamp(.98rem,1.45vw,1.18rem);font-weight:500;
+  margin:clamp(.42rem,.9vw,.72rem) 0 0;color:rgba(220,230,255,.78);
+  font-size:clamp(.84rem,1.05vw,1rem);font-weight:500;
   text-shadow:0 0 10px rgba(94,234,255,.22);
 }
 main{
-  width:100%;padding:clamp(.75rem,2vw,1rem);
+  width:100%;padding:clamp(.55rem,1.25vw,.85rem);
   background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.018));
   border:1px solid rgba(255,255,255,.09);border-radius:28px;
   box-shadow:0 26px 80px rgba(0,0,0,.44),0 0 70px rgba(140,82,255,.16);
@@ -247,7 +249,7 @@ main{
 .retry-button{border-color:rgba(255,54,93,.72);color:#ffd7df;box-shadow:0 0 18px rgba(255,54,93,.18)}
 .retry-button:hover{border-color:var(--red);color:#fff;box-shadow:0 0 24px rgba(255,54,93,.34)}
 footer.footer-credits{
-  margin-top:auto;padding:1.4rem .4rem .2rem;text-align:center;color:#a99fc6;font-size:.78rem;line-height:1.6;
+  margin-top:.35rem;padding:.2rem .4rem .05rem;text-align:center;color:#a99fc6;font-size:.64rem;line-height:1.25;
   text-shadow:0 0 10px rgba(140,82,255,.25);
 }
 footer.footer-credits .credit-secondary{color:#7f7598}
@@ -263,86 +265,95 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   .option-group{align-items:flex-start;flex-direction:column;gap:.35rem}
 }
 .product-kicker{
-  color:#7dd3fc;text-transform:uppercase;font-size:.78rem;letter-spacing:.18em;
-  margin-bottom:.65rem;text-shadow:0 0 14px rgba(125,211,252,.35);
+  color:#7dd3fc;text-transform:uppercase;font-size:.68rem;letter-spacing:.16em;
+  margin-bottom:.35rem;text-shadow:0 0 14px rgba(125,211,252,.35);
 }
 .quality-hero-title{
-  display:block;text-transform:none;font-size:clamp(2.4rem,6vw,5.6rem);
+  display:block;text-transform:none;font-size:clamp(1.7rem,3.15vw,2.95rem);
   letter-spacing:0;line-height:.96;max-width:920px;
 }
 .beta-badge{
-  display:inline-flex;margin-top:1rem;padding:.32rem .72rem;border:1px solid rgba(125,211,252,.38);
-  border-radius:999px;background:rgba(8,12,28,.58);color:#dbeafe;font-size:.78rem;
+  display:inline-flex;margin-top:.55rem;padding:.24rem .58rem;border:1px solid rgba(125,211,252,.38);
+  border-radius:999px;background:rgba(8,12,28,.58);color:#dbeafe;font-size:.68rem;
 }
-.quality-console{width:min(100%,980px);margin-inline:auto}
+.quality-console{width:min(100%,1100px);margin-inline:auto}
 .console-card{
-  position:relative;padding:1rem;border-radius:28px;
+  position:relative;padding:.72rem;border-radius:22px;
   background:linear-gradient(180deg,rgba(18,24,45,.86),rgba(9,10,24,.9));
   border:1px solid rgba(148,163,184,.2);
   box-shadow:0 28px 90px rgba(0,0,0,.48),0 0 80px rgba(79,70,229,.18),inset 0 0 44px rgba(15,23,42,.65);
 }
 .console-topbar,.console-hint-row,.action-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
-.console-topbar{margin-bottom:1rem}
+.console-topbar{margin-bottom:.55rem}
 .engine-brand{display:flex;align-items:center;gap:.55rem}
 .logo-mark{
   display:inline-flex;align-items:center;justify-content:center;width:52px;height:30px;border-radius:10px;
   background:linear-gradient(135deg,#111827,#312e81);border:1px solid rgba(125,211,252,.38);
   color:#fff;font-size:.72rem;font-weight:900;letter-spacing:.08em;
 }
-.engine-version{color:#a5b4fc;font-size:.82rem}
+.engine-version{color:#a5b4fc;font-size:.74rem}
 .engine-status{
-  display:inline-flex;align-items:center;gap:.45rem;color:#bbf7d0;font-size:.78rem;font-weight:800;letter-spacing:.08em;
+  display:inline-flex;align-items:center;gap:.45rem;color:#bbf7d0;font-size:.7rem;font-weight:800;letter-spacing:.08em;
 }
 .active-dot{width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 14px #22c55e}
-.quality-dropzone{padding:clamp(1.5rem,4vw,2.7rem) 1rem 1rem;border-color:rgba(125,211,252,.55)}
-.quality-dropzone .dropzone-icon{font-size:2.7rem}
+.quality-dropzone{padding:clamp(.58rem,1.25vw,.9rem) .65rem .6rem;border-color:rgba(125,211,252,.55)}
+.quality-dropzone .dropzone-icon{font-size:1.55rem;margin-bottom:.2rem}
 .wave-canvas{
-  display:block;width:100%;height:104px;margin-top:1.4rem;border-radius:18px;
+  display:block;width:100%;height:88px;margin-top:.5rem;border-radius:14px;
   background:linear-gradient(90deg,rgba(14,165,233,.08),rgba(168,85,247,.14),rgba(34,197,94,.08));
   border:1px solid rgba(148,163,184,.14);
 }
-.console-hint-row{padding:.85rem .25rem .1rem;color:#94a3b8;font-size:.76rem}
-.control-strip,.analysis-preview,.spectral-risk-grid,.timeline-panel{
-  margin-top:1rem;border-radius:22px;background:rgba(8,13,30,.72);
-  border:1px solid rgba(148,163,184,.16);box-shadow:inset 0 0 28px rgba(30,41,59,.45);
-  padding:1rem;
+.visualizer-controls{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.5rem;flex-wrap:wrap}
+.visualizer-button{
+  border:1px solid rgba(125,211,252,.42);border-radius:999px;background:rgba(2,6,23,.64);
+  color:#e0f2fe;font-size:.72rem;font-weight:850;padding:.35rem .7rem;cursor:pointer;
+  box-shadow:0 0 16px rgba(14,165,233,.12);
 }
-.mode-group{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-bottom:.9rem}
+.visualizer-button:disabled{opacity:.45;cursor:not-allowed}
+.visualizer-button:not(:disabled):hover{border-color:#67e8f9;color:#fff;box-shadow:0 0 22px rgba(14,165,233,.24)}
+.visualizer-status{color:#94a3b8;font-size:.7rem;text-align:right}
+.console-hint-row{padding:.55rem .2rem 0;color:#94a3b8;font-size:.68rem}
+.control-strip,.analysis-preview,.spectral-risk-grid,.timeline-panel{
+  margin-top:.65rem;border-radius:18px;background:rgba(8,13,30,.72);
+  border:1px solid rgba(148,163,184,.16);box-shadow:inset 0 0 28px rgba(30,41,59,.45);
+  padding:.68rem;
+}
+.mode-group{display:grid;grid-template-columns:repeat(5,1fr);gap:.42rem;margin-bottom:.58rem}
 .mode-button{
   border:1px solid rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.68);
-  color:#cbd5e1;padding:.6rem .5rem;font-weight:750;cursor:pointer;
+  color:#cbd5e1;padding:.45rem .38rem;font-size:.72rem;font-weight:750;cursor:pointer;
 }
 .mode-button.active{color:#fff;border-color:rgba(125,211,252,.7);box-shadow:0 0 18px rgba(14,165,233,.2)}
-.control-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
-.control-grid label{display:flex;flex-direction:column;gap:.35rem;color:#94a3b8;font-size:.78rem}
+.control-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.48rem}
+.control-grid label{display:flex;flex-direction:column;gap:.24rem;color:#94a3b8;font-size:.68rem}
 .control-grid select{
-  background:#020617;color:#f8fafc;border:1px solid rgba(148,163,184,.28);border-radius:10px;padding:.52rem .58rem;
+  background:#020617;color:#f8fafc;border:1px solid rgba(148,163,184,.28);border-radius:9px;padding:.38rem .46rem;font-size:.72rem;
 }
-.advanced-toggle span{display:flex;align-items:center;gap:.4rem;color:#cbd5e1;min-height:38px}
-.action-row{margin-top:.9rem;justify-content:flex-start}
-.action-row .btn-primary{width:auto;min-width:190px;margin:0}
-.analysis-preview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
+.advanced-toggle span{display:flex;align-items:center;gap:.35rem;color:#cbd5e1;min-height:30px}
+.action-row{margin-top:.58rem;justify-content:flex-start}
+.action-row .btn-primary{width:auto;min-width:160px;margin:0}
+.analysis-preview{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
 .meter-card,.metric-card,.spectral-risk-grid div{
   background:linear-gradient(180deg,rgba(15,23,42,.82),rgba(2,6,23,.75));
-  border:1px solid rgba(148,163,184,.15);border-radius:16px;padding:.85rem;
+  border:1px solid rgba(148,163,184,.15);border-radius:13px;padding:.58rem;
 }
 .lufs-card{grid-column:span 2}
-.metric-card span,.meter-card span,.spectral-risk-grid span{display:block;color:#94a3b8;font-size:.74rem;margin-bottom:.35rem}
-.metric-card strong,.meter-card strong,.spectral-risk-grid strong{color:#f8fafc;font-size:1rem}
-.lufs-card small{display:block;margin-top:.2rem;color:#c4b5fd;font-size:.74rem}
+.metric-card span,.meter-card span,.spectral-risk-grid span{display:block;color:#94a3b8;font-size:.65rem;margin-bottom:.22rem}
+.metric-card strong,.meter-card strong,.spectral-risk-grid strong{color:#f8fafc;font-size:.82rem}
+.lufs-card small{display:block;margin-top:.12rem;color:#c4b5fd;font-size:.64rem}
 .metric-card.readiness strong{color:#67e8f9}
 .lufs-meter{height:7px;border-radius:999px;background:#111827;margin-top:.7rem;overflow:hidden}
 .lufs-meter span{display:block;height:100%;width:0;background:linear-gradient(90deg,#22c55e,#38bdf8,#a855f7);transition:width .35s}
-.spectral-risk-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.75rem}
-.timeline-panel h2{font-size:.9rem;color:#e2e8f0;margin-bottom:.75rem}
-.timeline-panel ol{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem;list-style:none;counter-reset:steps}
+.spectral-risk-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
+.timeline-panel h2{font-size:.78rem;color:#e2e8f0;margin-bottom:.48rem}
+.timeline-panel ol{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:.4rem;list-style:none;counter-reset:steps}
 .timeline-panel li{
-  counter-increment:steps;position:relative;padding:.65rem .65rem .65rem 2rem;border-radius:13px;
-  background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.14);color:#94a3b8;font-size:.76rem;
+  counter-increment:steps;position:relative;padding:.46rem .42rem .46rem 1.62rem;border-radius:11px;
+  background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.14);color:#94a3b8;font-size:.62rem;
 }
 .timeline-panel li::before{
-  content:counter(steps);position:absolute;left:.55rem;top:.55rem;width:1.05rem;height:1.05rem;border-radius:50%;
-  display:grid;place-items:center;background:#1e293b;color:#cbd5e1;font-size:.65rem;font-weight:800;
+  content:counter(steps);position:absolute;left:.38rem;top:.42rem;width:.92rem;height:.92rem;border-radius:50%;
+  display:grid;place-items:center;background:#1e293b;color:#cbd5e1;font-size:.56rem;font-weight:800;
 }
 .timeline-panel li.done{border-color:rgba(34,197,94,.45);color:#dcfce7}
 .timeline-panel li.done::before{background:#16a34a;color:#fff}
@@ -352,6 +363,26 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   .mode-group,.control-grid,.analysis-preview,.spectral-risk-grid,.timeline-panel ol{grid-template-columns:1fr}
   .lufs-card{grid-column:auto}
   .action-row .btn-primary{width:100%}
+}
+@media (min-width:900px){
+  main.quality-console{
+    display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr);
+    gap:.62rem;align-items:start;
+  }
+  .console-card,.control-strip,.timeline-panel{grid-column:1}
+  .analysis-preview,.spectral-risk-grid,#status,#result,#error{grid-column:2}
+  .console-card{grid-row:1}
+  .analysis-preview{grid-row:1 / span 2;margin-top:0}
+  .control-strip{grid-row:2}
+  .spectral-risk-grid{grid-row:3;margin-top:0}
+  .timeline-panel{grid-row:3;margin-top:0}
+  #status,#result,#error{grid-row:4;margin-top:.55rem}
+  .analysis-preview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .spectral-risk-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .timeline-panel ol{grid-template-columns:repeat(8,minmax(0,1fr));gap:.28rem}
+  .timeline-panel li{padding:.38rem .28rem .38rem 1.25rem;font-size:.52rem;line-height:1.08}
+  .timeline-panel li::before{left:.3rem;top:.38rem;width:.74rem;height:.74rem;font-size:.48rem}
+  .control-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 """
 
@@ -368,9 +399,24 @@ JS_APP = """\
   const status = $('status');
   const result = $('result');
   const error = $('error');
+  const playPreviewBtn = $('playPreviewBtn');
+  const visualizerStatus = $('visualizerStatus');
+  const previewAudio = $('previewAudio');
   let selectedFile = null;
   let selectedMode = 'safe_master';
-  drawWavePlaceholder();
+  let selectedObjectUrl = null;
+  const visualizer = {
+    raf: null,
+    mode: 'idle',
+    waveform: null,
+    progress: 0,
+    audioCtx: null,
+    analyser: null,
+    source: null,
+    freqData: null,
+    lastNow: 0
+  };
+  startVisualizer('idle');
 
   document.querySelectorAll('.mode-button').forEach(btn => {
     btn.addEventListener('click', () => setMode(btn.dataset.mode));
@@ -393,7 +439,7 @@ JS_APP = """\
       safe_master: 'Analyze & Master',
       naturalize: 'Naturalize Pass',
       full_release: 'Analyze & Master',
-      legacy_sanitize: 'Legacy GPU Clean'
+      metadata_clean: 'Meta Data Clean'
     };
     $('processBtn').textContent = labels[mode] || 'Analyze & Master';
   }
@@ -421,6 +467,7 @@ JS_APP = """\
       return;
     }
     selectedFile = file;
+    setPreviewAudio(URL.createObjectURL(file), 'Input preview ready');
     // Show filename in dropzone
     let fn = dropzone.querySelector('.filename');
     if (!fn) { fn = document.createElement('p'); fn.className='filename'; dropzone.querySelector('.dropzone-content').appendChild(fn); }
@@ -429,7 +476,8 @@ JS_APP = """\
     result.hidden = true;
     error.hidden = true;
     resetMetrics();
-    drawWavePlaceholder(file.name);
+    setGeneratedWaveform(file.name);
+    startVisualizer('idle');
   }
 
   // --- Process ---
@@ -450,6 +498,7 @@ JS_APP = """\
     $('progressFill').style.width = '0%';
     $('processBtn').disabled = true;
     setTimeline(['upload']);
+    startVisualizer('processing');
 
     const formData = new FormData();
     formData.append('file', selectedFile);
@@ -475,6 +524,7 @@ JS_APP = """\
         if (data.job_id) {
           $('statusText').textContent = data.message || 'Quality job queued...';
           $('progressFill').style.width = '25%';
+          visualizer.progress = .25;
           pollJob(data.job_id);
         } else {
           showError(data.error || 'Unable to start processing job.');
@@ -512,7 +562,9 @@ JS_APP = """\
             return;
           }
           $('statusText').textContent = data.message || 'Processing audio...';
-          $('progressFill').style.width = Math.max(25, Math.min(data.progress || 25, 99)) + '%';
+          const progressValue = Math.max(25, Math.min(data.progress || 25, 99));
+          $('progressFill').style.width = progressValue + '%';
+          visualizer.progress = progressValue / 100;
           setTimeline(data.processing_steps || []);
           if (data.status === 'complete') {
             $('progressFill').style.width = '100%';
@@ -534,7 +586,9 @@ JS_APP = """\
   function showResult(data) {
     status.hidden = true;
     result.hidden = false;
-    $('resultText').textContent = data.mode === 'analyze_only' ? 'Analysis report generated.' : 'Mastering pass complete.';
+    $('resultText').textContent = data.mode === 'analyze_only'
+      ? 'Analysis report generated.'
+      : (data.mode === 'metadata_clean' ? 'Meta data clean complete.' : 'Mastering pass complete.');
     const stats = data.stats || {};
     updateMetrics(data);
     const rows = [
@@ -559,12 +613,16 @@ JS_APP = """\
       $('downloadLink').hidden = false;
       $('downloadLink').href = '/api/download/' + data.download_token;
       $('downloadLink').download = data.filename || 'master_audio';
+      $('downloadLink').textContent = data.mode === 'metadata_clean' ? 'Download Clean Audio' : 'Download Master';
+      setPreviewAudio('/api/download/' + data.download_token, 'Processed audio ready');
     } else {
       $('downloadLink').hidden = true;
     }
     setReportLink('jsonReportLink', data.report_artifacts && data.report_artifacts.json_download_token);
     setReportLink('htmlReportLink', data.report_artifacts && data.report_artifacts.html_download_token);
+    loadWaveformArtifact(data.waveform_artifact && data.waveform_artifact.json_download_token);
     setTimeline(data.processing_steps || []);
+    startVisualizer('result');
   }
 
   function showError(msg) {
@@ -574,6 +632,7 @@ JS_APP = """\
     $('errorText').textContent = msg;
     $('processBtn').disabled = false;
     setTimeline([]);
+    startVisualizer('error');
   }
 
   $('resetBtn').addEventListener('click', resetUI);
@@ -581,6 +640,7 @@ JS_APP = """\
 
   function resetUI() {
     selectedFile = null;
+    setPreviewAudio('', 'Drop audio to preview waveform');
     fileInput.value = '';
     const fn = dropzone.querySelector('.filename');
     if (fn) fn.remove();
@@ -590,7 +650,8 @@ JS_APP = """\
     error.hidden = true;
     $('processBtn').disabled = false;
     resetMetrics();
-    drawWavePlaceholder();
+    visualizer.waveform = null;
+    startVisualizer('idle');
   }
 
   function setReportLink(id, token) {
@@ -607,8 +668,8 @@ JS_APP = """\
     const before = data.metrics_before || {};
     const after = data.metrics_after || before;
     const metrics = after || {};
-    if (data.mode === 'legacy_sanitize' && !data.metrics_after) {
-      resetMetrics('Legacy sanitizer path');
+    if (data.mode === 'metadata_clean' && !data.metrics_after) {
+      resetMetrics('Meta data clean path');
       return;
     }
     $('metricLufs').textContent = formatMetric(metrics.integrated_lufs, ' LUFS');
@@ -653,31 +714,241 @@ JS_APP = """\
     });
   }
 
-  function drawWavePlaceholder(seed) {
+  if (playPreviewBtn) {
+    playPreviewBtn.addEventListener('click', async () => {
+      if (!previewAudio || !previewAudio.src) return;
+      try {
+        await ensureAudioAnalyser();
+        if (previewAudio.paused) {
+          await previewAudio.play();
+          playPreviewBtn.textContent = 'Pause';
+          startVisualizer('playing');
+        } else {
+          previewAudio.pause();
+          playPreviewBtn.textContent = 'Play';
+          startVisualizer('result');
+        }
+      } catch (err) {
+        visualizerStatus.textContent = 'Playback unavailable in this browser';
+      }
+    });
+  }
+
+  if (previewAudio) {
+    previewAudio.addEventListener('ended', () => {
+      playPreviewBtn.textContent = 'Play';
+      startVisualizer('result');
+    });
+    previewAudio.addEventListener('pause', () => {
+      if (playPreviewBtn) playPreviewBtn.textContent = 'Play';
+    });
+    previewAudio.addEventListener('play', () => {
+      if (playPreviewBtn) playPreviewBtn.textContent = 'Pause';
+      startVisualizer('playing');
+    });
+  }
+
+  function setPreviewAudio(src, statusText) {
+    if (!previewAudio) return;
+    if (selectedObjectUrl && selectedObjectUrl !== src) {
+      URL.revokeObjectURL(selectedObjectUrl);
+      selectedObjectUrl = null;
+    }
+    if (src && src.startsWith('blob:')) selectedObjectUrl = src;
+    previewAudio.pause();
+    previewAudio.removeAttribute('src');
+    if (src) previewAudio.src = src;
+    previewAudio.load();
+    if (playPreviewBtn) {
+      playPreviewBtn.disabled = !src;
+      playPreviewBtn.textContent = 'Play';
+    }
+    if (visualizerStatus) visualizerStatus.textContent = statusText || 'Visualizer ready';
+  }
+
+  function setGeneratedWaveform(seed) {
+    const points = 180;
+    let hash = 0;
+    const text = seed || 'mmv2';
+    for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    const peaks = [];
+    const rms = [];
+    for (let i = 0; i < points; i++) {
+      const t = i / Math.max(1, points - 1);
+      const wobble = Math.sin(t * 18 + hash * .01) * .18 + Math.sin(t * 49 + hash * .004) * .09;
+      const env = .24 + .62 * Math.pow(Math.sin(Math.PI * t), .35);
+      const value = Math.max(.04, Math.min(.98, env * (.58 + wobble)));
+      peaks.push(value);
+      rms.push(value * (.45 + .12 * Math.sin(t * 24 + 1.7)));
+    }
+    visualizer.waveform = {peaks, rms, duration: previewAudio && previewAudio.duration ? previewAudio.duration : 0};
+  }
+
+  function loadWaveformArtifact(token) {
+    if (!token) return;
+    fetch('/api/download/' + encodeURIComponent(token), {cache:'no-store'})
+      .then(resp => resp.ok ? resp.json() : null)
+      .then(data => {
+        if (!data || !Array.isArray(data.peaks)) return;
+        visualizer.waveform = data;
+        if (visualizerStatus) {
+          const duration = data.duration ? formatDuration(data.duration) : 'processed';
+          visualizerStatus.textContent = 'Master waveform loaded · ' + duration;
+        }
+      })
+      .catch(() => {});
+  }
+
+  async function ensureAudioAnalyser() {
+    if (!previewAudio) return;
+    if (!visualizer.audioCtx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) throw new Error('AudioContext unavailable');
+      visualizer.audioCtx = new AudioCtx();
+      visualizer.analyser = visualizer.audioCtx.createAnalyser();
+      visualizer.analyser.fftSize = 1024;
+      visualizer.freqData = new Uint8Array(visualizer.analyser.frequencyBinCount);
+    }
+    if (!visualizer.source) {
+      visualizer.source = visualizer.audioCtx.createMediaElementSource(previewAudio);
+      visualizer.source.connect(visualizer.analyser);
+      visualizer.analyser.connect(visualizer.audioCtx.destination);
+    }
+    if (visualizer.audioCtx.state === 'suspended') await visualizer.audioCtx.resume();
+  }
+
+  function startVisualizer(mode) {
+    visualizer.mode = mode || visualizer.mode || 'idle';
+    if (visualizer.raf) return;
+    const tick = now => {
+      visualizer.lastNow = now || 0;
+      drawWavePlaceholder(now || 0);
+      visualizer.raf = requestAnimationFrame(tick);
+    };
+    visualizer.raf = requestAnimationFrame(tick);
+  }
+
+  function drawWavePlaceholder(now) {
     const canvas = $('waveCanvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0,0,w,h);
-    const grd = ctx.createLinearGradient(0,0,w,0);
-    grd.addColorStop(0,'rgba(56,189,248,.85)');
-    grd.addColorStop(.55,'rgba(168,85,247,.95)');
-    grd.addColorStop(1,'rgba(34,197,94,.75)');
-    ctx.strokeStyle = grd;
-    ctx.lineWidth = 2;
-    for (let row=0; row<3; row++) {
-      ctx.beginPath();
-      for (let x=0; x<w; x+=6) {
-        const t = x / w;
-        const amp = 10 + row*5 + 12*Math.sin(t*6.28*(row+1) + (seed ? seed.length : 3));
-        const y = h/2 + Math.sin(t*35 + row*1.7) * amp * (0.35 + row*.16);
-        if (x === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-      }
-      ctx.globalAlpha = .35 + row*.18;
-      ctx.stroke();
+    drawVisualizerBackdrop(ctx, w, h, now);
+    const waveform = visualizer.waveform || buildFallbackWaveform(now);
+    drawWaveformLayer(ctx, w, h, waveform, now);
+    drawSpectrumLayer(ctx, w, h, now);
+    drawPlayhead(ctx, w, h, now);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawVisualizerBackdrop(ctx, w, h, now) {
+    const bg = ctx.createLinearGradient(0,0,w,h);
+    bg.addColorStop(0,'rgba(2,6,23,.88)');
+    bg.addColorStop(.55,'rgba(30,27,75,.72)');
+    bg.addColorStop(1,'rgba(5,46,64,.58)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0,0,w,h);
+    ctx.globalAlpha = .28;
+    ctx.strokeStyle = 'rgba(125,211,252,.22)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= w; x += 36) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + Math.sin((now || 0) * .001 + x) * 5, h); ctx.stroke();
+    }
+    for (let y = 18; y < h; y += 22) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+
+  function drawWaveformLayer(ctx, w, h, waveform, now) {
+    const peaks = waveform.peaks || [];
+    const rms = waveform.rms || peaks;
+    if (!peaks.length) return;
+    const center = h * .5;
+    const barW = Math.max(2, w / peaks.length);
+    const pulse = .88 + .12 * Math.sin((now || 0) * .004);
+    for (let i = 0; i < peaks.length; i++) {
+      const x = i * barW;
+      const peak = Math.min(1, Math.max(.015, Number(peaks[i]) || 0));
+      const r = Math.min(1, Math.max(.01, Number(rms[i]) || peak * .55));
+      const height = Math.max(2, peak * h * .42 * pulse);
+      const rmsHeight = Math.max(1, r * h * .32);
+      const g = ctx.createLinearGradient(x, center - height, x, center + height);
+      g.addColorStop(0,'rgba(103,232,249,.92)');
+      g.addColorStop(.52,'rgba(168,85,247,.95)');
+      g.addColorStop(1,'rgba(52,211,153,.78)');
+      ctx.fillStyle = g;
+      ctx.globalAlpha = .75;
+      ctx.fillRect(x, center - height, Math.max(1, barW * .58), height * 2);
+      ctx.fillStyle = 'rgba(255,255,255,.42)';
+      ctx.globalAlpha = .34;
+      ctx.fillRect(x, center - rmsHeight, Math.max(1, barW * .28), rmsHeight * 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSpectrumLayer(ctx, w, h, now) {
+    let bins = null;
+    if (visualizer.analyser && visualizer.freqData && previewAudio && !previewAudio.paused) {
+      visualizer.analyser.getByteFrequencyData(visualizer.freqData);
+      bins = visualizer.freqData;
+    }
+    const count = 28;
+    const baseY = h - 6;
+    for (let i = 0; i < count; i++) {
+      const binValue = bins ? bins[Math.min(bins.length - 1, Math.floor(i / count * bins.length))] / 255 : 0;
+      const idleValue = .2 + .24 * Math.sin((now || 0) * .0022 + i * .72);
+      const value = visualizer.mode === 'processing'
+        ? Math.max(idleValue, visualizer.progress * (.35 + i / count * .55))
+        : (bins ? binValue : Math.max(.08, idleValue));
+      const barH = Math.max(2, value * h * .28);
+      const x = 10 + i * ((w - 20) / count);
+      ctx.fillStyle = i < count * .28 ? 'rgba(34,211,238,.52)' : i < count * .72 ? 'rgba(168,85,247,.46)' : 'rgba(251,191,36,.42)';
+      ctx.fillRect(x, baseY - barH, Math.max(2, (w - 28) / count * .45), barH);
+    }
+  }
+
+  function drawPlayhead(ctx, w, h, now) {
+    let progress = visualizer.mode === 'processing' ? visualizer.progress : 0;
+    if (previewAudio && previewAudio.duration && Number.isFinite(previewAudio.duration)) {
+      progress = previewAudio.currentTime / previewAudio.duration;
+    } else if (visualizer.mode === 'idle' || visualizer.mode === 'error') {
+      progress = ((now || 0) * .00008) % 1;
+    }
+    progress = Math.max(0, Math.min(1, progress || 0));
+    const x = progress * w;
+    ctx.globalAlpha = .95;
+    ctx.strokeStyle = 'rgba(255,255,255,.86)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, 6); ctx.lineTo(x, h - 6); ctx.stroke();
+    const glow = ctx.createRadialGradient(x, h*.5, 0, x, h*.5, 42);
+    glow.addColorStop(0,'rgba(56,189,248,.32)');
+    glow.addColorStop(1,'rgba(56,189,248,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(Math.max(0, x - 45), 0, 90, h);
+    ctx.globalAlpha = 1;
+  }
+
+  function buildFallbackWaveform(now) {
+    const points = 150;
+    const peaks = [];
+    const rms = [];
+    for (let i = 0; i < points; i++) {
+      const t = i / points;
+      const value = .25 + .42 * Math.abs(Math.sin(t * 16 + (now || 0) * .0012)) + .12 * Math.sin(t * 53);
+      peaks.push(Math.max(.05, Math.min(.96, value)));
+      rms.push(Math.max(.03, value * .48));
+    }
+    return {peaks, rms};
+  }
+
+  function formatDuration(seconds) {
+    const total = Math.max(0, Math.round(Number(seconds) || 0));
+    const min = Math.floor(total / 60);
+    const sec = String(total % 60).padStart(2, '0');
+    return min + ':' + sec;
   }
 
   function formatMetric(value, suffix) {
@@ -766,6 +1037,11 @@ HTML_TEMPLATE = """\
         <input type="file" id="fileInput" accept=".mp3,.wav,.flac,.aiff,.aif" hidden>
       </div>
       <canvas id="waveCanvas" class="wave-canvas" width="720" height="104" aria-hidden="true"></canvas>
+      <div class="visualizer-controls">
+        <button id="playPreviewBtn" class="visualizer-button" type="button" disabled>Play</button>
+        <span id="visualizerStatus" class="visualizer-status">Drop audio to preview waveform</span>
+      </div>
+      <audio id="previewAudio" preload="metadata" hidden></audio>
     </div>
 
     <div class="console-hint-row">
@@ -781,7 +1057,7 @@ HTML_TEMPLATE = """\
       <button class="mode-button active" data-mode="safe_master" type="button">Safe Master</button>
       <button class="mode-button" data-mode="naturalize" type="button">Naturalize Pass</button>
       <button class="mode-button" data-mode="full_release" type="button">Full Release Pass</button>
-      <button class="mode-button" data-mode="legacy_sanitize" type="button">Legacy GPU Clean</button>
+      <button class="mode-button" data-mode="metadata_clean" type="button">Meta Data Clean</button>
     </div>
     <div class="control-grid">
       <label>Output format
@@ -821,8 +1097,8 @@ HTML_TEMPLATE = """\
           <option value="32">32-bit float</option>
         </select>
       </label>
-      <label class="advanced-toggle">Advanced legacy clean
-        <span><input type="checkbox" id="paranoidToggle"> Aggressive legacy profile</span>
+      <label class="advanced-toggle">Clean export
+        <span><input type="checkbox" id="paranoidToggle"> Aggressive full clean profile</span>
       </label>
     </div>
     <div class="action-row">
@@ -1067,6 +1343,7 @@ def create_app(
             "engine_version": ENGINE_VERSION,
             "max_file_size_mb": max_size_mb,
             "gpu_available": cuda_available(),
+            "metadata_modes": [METADATA_CLEAN_MODE],
             "quality_modes": sorted(QUALITY_MODES),
             "loudness_targets": LOUDNESS_TARGETS,
         }), 200
@@ -1164,9 +1441,11 @@ def _handle_upload(app: Flask, processing_lock: threading.Lock) -> tuple:
         output_format = "preserve"
 
     paranoid = request.form.get("paranoid", "false").lower() == "true"
-    mode = request.form.get("mode", "legacy_sanitize")
-    if mode not in QUALITY_MODES and mode != "legacy_sanitize":
-        mode = "legacy_sanitize"
+    mode = request.form.get("mode", METADATA_CLEAN_MODE)
+    if mode in LEGACY_MODE_ALIASES:
+        mode = METADATA_CLEAN_MODE
+    elif mode not in QUALITY_MODES:
+        mode = METADATA_CLEAN_MODE
     quality_options = _parse_quality_options(request.form)
 
     # Save to temp directory with UUID prefix
@@ -1249,11 +1528,18 @@ def _process_upload_job(
                 job_id,
                 status="processing",
                 progress=35,
-                message="Starting legacy CUDA sanitizer...",
+                message="Removing file metadata...",
                 processing_steps=["upload", "metadata"],
             )
             fmt = None if output_format == "preserve" else output_format
-            result = _sanitize_gpu_first(app, input_path, fmt, paranoid, job_id)
+            result = _process_metadata_clean_job(
+                app,
+                job_id,
+                input_path,
+                safe_name,
+                fmt,
+                strict_verification=paranoid,
+            )
 
         if not result.get("success"):
             _update_job(
@@ -1366,6 +1652,52 @@ def _sanitize_gpu_first(
         stats["gpu_acceleration"] = False
         stats["gpu_fallback_error"] = str(exc)
         return result
+
+
+def _process_metadata_clean_job(
+    app: Flask,
+    job_id: str,
+    input_path: Path,
+    safe_name: str,
+    output_format: Optional[str],
+    *,
+    strict_verification: bool,
+) -> Dict[str, Any]:
+    """Run the full legacy-preserving clean profile under the metadata-clean mode."""
+    from .preserving_sanitizer import preserving_sanitize
+
+    _update_job(
+        app,
+        job_id,
+        progress=55,
+        message="Running full meta data clean profile...",
+        processing_steps=["upload", "metadata", "render"],
+    )
+
+    result = preserving_sanitize(
+        input_file=input_path,
+        output_file=None,
+        paranoid_mode=strict_verification,
+        threat_count=0,
+        output_format=output_format,
+        verbose=False,
+    )
+    if not result.get("success"):
+        return result
+
+    stats = result.setdefault("stats", {})
+    methods_used = list(stats.get("methods_used", []))
+    if strict_verification:
+        methods_used.append("strict_metadata_verification")
+    stats["methods_used"] = methods_used
+    stats["processing_engine"] = "metadata_clean_full_legacy"
+    stats["gpu_acceleration"] = False
+    stats["gpu_device"] = None
+
+    result["timeline_steps"] = ["upload", "metadata", "render", "report"]
+    result["preview_protected"] = "N/A"
+    result["peak_safety"] = "N/A"
+    return result
 
 
 def _process_quality_job(

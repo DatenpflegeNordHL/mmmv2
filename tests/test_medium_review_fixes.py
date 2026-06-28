@@ -791,26 +791,27 @@ def test_gpu_web_sanitize_rejects_unchanged_written_output(monkeypatch, tmp_path
         gpu_web_module.gpu_web_sanitize(input_file, verbose=False)
 
 
-def test_server_upload_runs_gpu_background_job(monkeypatch):
+def test_server_upload_runs_metadata_clean_background_job(monkeypatch):
     app = create_app(max_file_size=1024 * 1024)
     client = app.test_client()
 
     monkeypatch.setattr(server_module, "_validate_audio_content", lambda _path: True)
 
-    def fake_gpu_web_sanitize(input_file, output_file=None, **_kwargs):
+    def fake_metadata_clean_job(*_args, **_kwargs):
+        input_file = _args[2]
         output_path = Path(input_file).with_suffix(".clean.wav")
         output_path.write_bytes(b"clean")
         return {
             "success": True,
             "output_file": str(output_path),
             "stats": {
-                "processing_engine": "gpu_cuda_web",
-                "gpu_acceleration": True,
-                "gpu_device": "test-gpu",
+                "processing_engine": "metadata_clean_full_legacy",
+                "gpu_acceleration": False,
+                "metadata_clean": True,
             },
         }
 
-    monkeypatch.setattr(server_module, "gpu_web_sanitize", fake_gpu_web_sanitize)
+    monkeypatch.setattr(server_module, "_process_metadata_clean_job", fake_metadata_clean_job)
 
     response = client.post(
         "/api/upload",
@@ -826,8 +827,9 @@ def test_server_upload_runs_gpu_background_job(monkeypatch):
     job_response = _wait_for_job(client, response.get_json()["job_id"])
     payload = job_response.get_json()
     assert payload["status"] == "complete"
-    assert payload["result"]["stats"]["processing_engine"] == "gpu_cuda_web"
-    assert payload["result"]["stats"]["gpu_acceleration"] is True
+    assert payload["result"]["mode"] == "metadata_clean"
+    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_full_legacy"
+    assert payload["result"]["stats"]["gpu_acceleration"] is False
 
 
 def test_server_upload_accepts_flac_output_option(monkeypatch):
@@ -837,17 +839,18 @@ def test_server_upload_accepts_flac_output_option(monkeypatch):
 
     monkeypatch.setattr(server_module, "_validate_audio_content", lambda _path: True)
 
-    def fake_gpu_web_sanitize(input_file, output_file=None, **kwargs):
-        seen["output_format"] = kwargs["output_format"]
+    def fake_metadata_clean_job(*_args, **_kwargs):
+        input_file = _args[2]
+        seen["output_format"] = _args[4]
         output_path = Path(input_file).with_suffix(".clean.flac")
         output_path.write_bytes(b"clean")
         return {
             "success": True,
             "output_file": str(output_path),
-            "stats": {"processing_engine": "gpu_cuda_web"},
+            "stats": {"processing_engine": "metadata_clean_full_legacy"},
         }
 
-    monkeypatch.setattr(server_module, "gpu_web_sanitize", fake_gpu_web_sanitize)
+    monkeypatch.setattr(server_module, "_process_metadata_clean_job", fake_metadata_clean_job)
 
     response = client.post(
         "/api/upload",
@@ -865,34 +868,35 @@ def test_server_upload_accepts_flac_output_option(monkeypatch):
     assert seen["output_format"] == "flac"
 
 
-def test_server_upload_falls_back_when_gpu_fails(monkeypatch):
-    import mmm.preserving_sanitizer as preserving_module
-
+def test_server_upload_legacy_mode_aliases_to_metadata_clean(monkeypatch):
     app = create_app(max_file_size=1024 * 1024)
     client = app.test_client()
+    seen = {}
 
     monkeypatch.setattr(server_module, "_validate_audio_content", lambda _path: True)
 
-    def fake_gpu_web_sanitize(*_args, **_kwargs):
-        raise RuntimeError("cuda oom")
-
-    def fake_preserving_sanitize(input_file, output_file=None, **_kwargs):
+    def fake_metadata_clean_job(*_args, **_kwargs):
+        seen["called"] = True
+        input_file = _args[2]
         output_path = Path(input_file).with_suffix(".clean.wav")
         output_path.write_bytes(b"clean")
         return {
             "success": True,
             "output_file": str(output_path),
-            "stats": {"processing_time": 1.0},
+            "stats": {
+                "processing_engine": "metadata_clean_full_legacy",
+                "gpu_acceleration": False,
+            },
         }
 
-    monkeypatch.setattr(server_module, "gpu_web_sanitize", fake_gpu_web_sanitize)
-    monkeypatch.setattr(preserving_module, "preserving_sanitize", fake_preserving_sanitize)
+    monkeypatch.setattr(server_module, "_process_metadata_clean_job", fake_metadata_clean_job)
 
     response = client.post(
         "/api/upload",
         data={
             "file": (BytesIO(b"audio"), "test.wav"),
             "format": "preserve",
+            "mode": "legacy_sanitize",
             "paranoid": "false",
         },
         content_type="multipart/form-data",
@@ -902,6 +906,7 @@ def test_server_upload_falls_back_when_gpu_fails(monkeypatch):
     job_response = _wait_for_job(client, response.get_json()["job_id"])
     payload = job_response.get_json()
     assert payload["status"] == "complete"
-    assert payload["result"]["stats"]["processing_engine"] == "cpu_preserving_fallback"
+    assert seen["called"] is True
+    assert payload["result"]["mode"] == "metadata_clean"
+    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_full_legacy"
     assert payload["result"]["stats"]["gpu_acceleration"] is False
-    assert "cuda oom" in payload["result"]["stats"]["gpu_fallback_error"]
