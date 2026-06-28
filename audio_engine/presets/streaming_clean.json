@@ -1,0 +1,6 @@
+{
+  "name": "streaming_clean",
+  "target_lufs": -14.0,
+  "limiter_ceiling_dbtp": -1.5,
+  "max_eq_gain_db": 1.5
+}

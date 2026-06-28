@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 from flask import Flask, request, jsonify, send_file, Response
 from mutagen import File as MutagenFile
@@ -24,9 +24,22 @@ from .gpu_web_sanitizer import cuda_available, gpu_web_sanitize
 # Constants
 # ---------------------------------------------------------------------------
 
-ALLOWED_EXTENSIONS: frozenset[str] = frozenset({"mp3", "wav", "flac"})
+ALLOWED_EXTENSIONS: frozenset[str] = frozenset({"mp3", "wav", "flac", "aiff", "aif"})
 DEFAULT_MAX_FILE_SIZE: int = 95 * 1024 * 1024  # Cloudflare-safe default
 DEFAULT_STALE_AGE: int = 3600  # 1 hour
+ENGINE_VERSION: str = "1.045"
+QUALITY_MODES: frozenset[str] = frozenset(
+    {"analyze_only", "safe_master", "naturalize", "full_release"}
+)
+OUTPUT_FORMATS: frozenset[str] = frozenset({"preserve", "mp3", "wav", "flac"})
+LOUDNESS_TARGETS: Dict[str, Dict[str, Union[float, str]]] = {
+    "streaming_safe": {"label": "Streaming Safe", "target_lufs": -14.0},
+    "club_loud": {"label": "Club/Loud", "target_lufs": -9.0},
+    "conservative": {"label": "Conservative", "target_lufs": -16.0},
+}
+TRUE_PEAK_CEILINGS: frozenset[str] = frozenset({"-1.0", "-1.5", "-2.0"})
+SAMPLE_RATE_OVERRIDES: frozenset[str] = frozenset({"preserve", "44100", "48000"})
+BIT_DEPTH_OVERRIDES: frozenset[str] = frozenset({"preserve", "16", "24", "32"})
 
 # ---------------------------------------------------------------------------
 # Embedded frontend — CSS
@@ -249,6 +262,96 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   .legal-panel{font-size:.76rem}
   .option-group{align-items:flex-start;flex-direction:column;gap:.35rem}
 }
+.product-kicker{
+  color:#7dd3fc;text-transform:uppercase;font-size:.78rem;letter-spacing:.18em;
+  margin-bottom:.65rem;text-shadow:0 0 14px rgba(125,211,252,.35);
+}
+.quality-hero-title{
+  display:block;text-transform:none;font-size:clamp(2.4rem,6vw,5.6rem);
+  letter-spacing:0;line-height:.96;max-width:920px;
+}
+.beta-badge{
+  display:inline-flex;margin-top:1rem;padding:.32rem .72rem;border:1px solid rgba(125,211,252,.38);
+  border-radius:999px;background:rgba(8,12,28,.58);color:#dbeafe;font-size:.78rem;
+}
+.quality-console{width:min(100%,980px);margin-inline:auto}
+.console-card{
+  position:relative;padding:1rem;border-radius:28px;
+  background:linear-gradient(180deg,rgba(18,24,45,.86),rgba(9,10,24,.9));
+  border:1px solid rgba(148,163,184,.2);
+  box-shadow:0 28px 90px rgba(0,0,0,.48),0 0 80px rgba(79,70,229,.18),inset 0 0 44px rgba(15,23,42,.65);
+}
+.console-topbar,.console-hint-row,.action-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+.console-topbar{margin-bottom:1rem}
+.engine-brand{display:flex;align-items:center;gap:.55rem}
+.logo-mark{
+  display:inline-flex;align-items:center;justify-content:center;width:52px;height:30px;border-radius:10px;
+  background:linear-gradient(135deg,#111827,#312e81);border:1px solid rgba(125,211,252,.38);
+  color:#fff;font-size:.72rem;font-weight:900;letter-spacing:.08em;
+}
+.engine-version{color:#a5b4fc;font-size:.82rem}
+.engine-status{
+  display:inline-flex;align-items:center;gap:.45rem;color:#bbf7d0;font-size:.78rem;font-weight:800;letter-spacing:.08em;
+}
+.active-dot{width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 14px #22c55e}
+.quality-dropzone{padding:clamp(1.5rem,4vw,2.7rem) 1rem 1rem;border-color:rgba(125,211,252,.55)}
+.quality-dropzone .dropzone-icon{font-size:2.7rem}
+.wave-canvas{
+  display:block;width:100%;height:104px;margin-top:1.4rem;border-radius:18px;
+  background:linear-gradient(90deg,rgba(14,165,233,.08),rgba(168,85,247,.14),rgba(34,197,94,.08));
+  border:1px solid rgba(148,163,184,.14);
+}
+.console-hint-row{padding:.85rem .25rem .1rem;color:#94a3b8;font-size:.76rem}
+.control-strip,.analysis-preview,.spectral-risk-grid,.timeline-panel{
+  margin-top:1rem;border-radius:22px;background:rgba(8,13,30,.72);
+  border:1px solid rgba(148,163,184,.16);box-shadow:inset 0 0 28px rgba(30,41,59,.45);
+  padding:1rem;
+}
+.mode-group{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.9rem}
+.mode-button{
+  border:1px solid rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.68);
+  color:#cbd5e1;padding:.6rem .5rem;font-weight:750;cursor:pointer;
+}
+.mode-button.active{color:#fff;border-color:rgba(125,211,252,.7);box-shadow:0 0 18px rgba(14,165,233,.2)}
+.control-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
+.control-grid label{display:flex;flex-direction:column;gap:.35rem;color:#94a3b8;font-size:.78rem}
+.control-grid select{
+  background:#020617;color:#f8fafc;border:1px solid rgba(148,163,184,.28);border-radius:10px;padding:.52rem .58rem;
+}
+.advanced-toggle span{display:flex;align-items:center;gap:.4rem;color:#cbd5e1;min-height:38px}
+.action-row{margin-top:.9rem;justify-content:flex-start}
+.action-row .btn-primary{width:auto;min-width:190px;margin:0}
+.analysis-preview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}
+.meter-card,.metric-card,.spectral-risk-grid div{
+  background:linear-gradient(180deg,rgba(15,23,42,.82),rgba(2,6,23,.75));
+  border:1px solid rgba(148,163,184,.15);border-radius:16px;padding:.85rem;
+}
+.lufs-card{grid-column:span 2}
+.metric-card span,.meter-card span,.spectral-risk-grid span{display:block;color:#94a3b8;font-size:.74rem;margin-bottom:.35rem}
+.metric-card strong,.meter-card strong,.spectral-risk-grid strong{color:#f8fafc;font-size:1rem}
+.metric-card.readiness strong{color:#67e8f9}
+.lufs-meter{height:7px;border-radius:999px;background:#111827;margin-top:.7rem;overflow:hidden}
+.lufs-meter span{display:block;height:100%;width:0;background:linear-gradient(90deg,#22c55e,#38bdf8,#a855f7);transition:width .35s}
+.spectral-risk-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.75rem}
+.timeline-panel h2{font-size:.9rem;color:#e2e8f0;margin-bottom:.75rem}
+.timeline-panel ol{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem;list-style:none;counter-reset:steps}
+.timeline-panel li{
+  counter-increment:steps;position:relative;padding:.65rem .65rem .65rem 2rem;border-radius:13px;
+  background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.14);color:#94a3b8;font-size:.76rem;
+}
+.timeline-panel li::before{
+  content:counter(steps);position:absolute;left:.55rem;top:.55rem;width:1.05rem;height:1.05rem;border-radius:50%;
+  display:grid;place-items:center;background:#1e293b;color:#cbd5e1;font-size:.65rem;font-weight:800;
+}
+.timeline-panel li.done{border-color:rgba(34,197,94,.45);color:#dcfce7}
+.timeline-panel li.done::before{background:#16a34a;color:#fff}
+.download-actions{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin:.8rem 0}
+.btn-download.subtle{background:linear-gradient(90deg,#1e293b,#334155);box-shadow:none}
+@media (max-width:760px){
+  .mode-group,.control-grid,.analysis-preview,.spectral-risk-grid,.timeline-panel ol{grid-template-columns:1fr}
+  .lufs-card{grid-column:auto}
+  .action-row .btn-primary{width:100%}
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -265,6 +368,33 @@ JS_APP = """\
   const result = $('result');
   const error = $('error');
   let selectedFile = null;
+  let selectedMode = 'safe_master';
+  drawWavePlaceholder();
+
+  document.querySelectorAll('.mode-button').forEach(btn => {
+    btn.addEventListener('click', () => setMode(btn.dataset.mode));
+  });
+  $('analyzeOnlyBtn').addEventListener('click', () => { setMode('analyze_only'); processFile(); });
+  $('safeMasterBtn').addEventListener('click', () => { setMode('safe_master'); processFile(); });
+  $('naturalizeBtn').addEventListener('click', () => { setMode('naturalize'); processFile(); });
+  $('loudnessTarget').addEventListener('change', () => {
+    const label = $('loudnessTarget').selectedOptions[0].textContent;
+    $('metricTarget').textContent = 'Target: ' + label;
+  });
+
+  function setMode(mode) {
+    selectedMode = mode;
+    document.querySelectorAll('.mode-button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    const labels = {
+      analyze_only: 'Analyze Only',
+      safe_master: 'Analyze & Master',
+      naturalize: 'Naturalize Pass',
+      full_release: 'Analyze & Master'
+    };
+    $('processBtn').textContent = labels[mode] || 'Analyze & Master';
+  }
 
   // --- Drop zone ---
   dropzone.addEventListener('click', () => fileInput.click());
@@ -279,8 +409,8 @@ JS_APP = """\
 
   function handleFile(file) {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['mp3','wav','flac'].includes(ext)) {
-      showError('Unsupported file type. Please use MP3, WAV, or FLAC.');
+    if (!['mp3','wav','flac','aiff','aif'].includes(ext)) {
+      showError('Unsupported file type. Please use WAV, FLAC, AIFF, or MP3.');
       return;
     }
     const maxBytes = parseInt(document.body.dataset.maxSize || '524288000', 10);
@@ -296,6 +426,8 @@ JS_APP = """\
     options.hidden = false;
     result.hidden = true;
     error.hidden = true;
+    resetMetrics();
+    drawWavePlaceholder(file.name);
   }
 
   // --- Process ---
@@ -305,6 +437,7 @@ JS_APP = """\
     if (!selectedFile) return;
     const fmt = $('formatSelect').value;
     const paranoid = $('paranoidToggle').checked;
+    const mode = paranoid ? 'legacy_sanitize' : selectedMode;
 
     // Show status
     options.hidden = true;
@@ -314,11 +447,17 @@ JS_APP = """\
     $('statusText').textContent = 'Uploading...';
     $('progressFill').style.width = '0%';
     $('processBtn').disabled = true;
+    setTimeline(['upload']);
 
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('format', fmt);
     formData.append('paranoid', paranoid ? 'true' : 'false');
+    formData.append('mode', mode);
+    formData.append('loudness_target', $('loudnessTarget').value);
+    formData.append('true_peak_ceiling', $('truePeakCeiling').value);
+    formData.append('sample_rate_override', $('sampleRateOverride').value);
+    formData.append('bit_depth_override', $('bitDepthOverride').value);
 
     const xhr = new XMLHttpRequest();
     xhr.upload.addEventListener('progress', e => {
@@ -332,7 +471,7 @@ JS_APP = """\
       if (xhr.status === 202) {
         const data = JSON.parse(xhr.responseText);
         if (data.job_id) {
-          $('statusText').textContent = data.message || 'GPU job queued...';
+          $('statusText').textContent = data.message || 'Quality job queued...';
           $('progressFill').style.width = '25%';
           pollJob(data.job_id);
         } else {
@@ -352,7 +491,7 @@ JS_APP = """\
     });
 
     xhr.upload.addEventListener('loadend', () => {
-      $('statusText').textContent = 'Upload complete. Starting GPU processing...';
+      $('statusText').textContent = 'Upload complete. Starting local engine...';
       $('progressFill').style.width = '25%';
     });
 
@@ -372,6 +511,7 @@ JS_APP = """\
           }
           $('statusText').textContent = data.message || 'Processing audio...';
           $('progressFill').style.width = Math.max(25, Math.min(data.progress || 25, 99)) + '%';
+          setTimeline(data.processing_steps || []);
           if (data.status === 'complete') {
             $('progressFill').style.width = '100%';
             showResult(data.result || {});
@@ -379,7 +519,7 @@ JS_APP = """\
             return;
           }
           if (data.status === 'failed') {
-            showError(data.error || 'Sanitization failed.');
+            showError(data.error || 'Processing failed.');
             return;
           }
           setTimeout(poll, 1200);
@@ -392,11 +532,18 @@ JS_APP = """\
   function showResult(data) {
     status.hidden = true;
     result.hidden = false;
-    $('resultText').textContent = 'File sanitized successfully!';
+    $('resultText').textContent = data.mode === 'analyze_only' ? 'Analysis report generated.' : 'Mastering pass complete.';
     const stats = data.stats || {};
+    updateMetrics(data);
     const rows = [
-      statRow('Engine', stats.processing_engine || 'N/A'),
+      statRow('Engine', data.engine_version ? 'MMV2 ' + data.engine_version : (stats.processing_engine || 'N/A')),
+      statRow('Mode', data.mode || 'N/A'),
+      statRow('Output format', data.output_format || 'N/A'),
+      statRow('Loudness target', data.loudness_target || 'N/A'),
+      statRow('Limiter ceiling', data.true_peak_ceiling ? data.true_peak_ceiling + ' dBTP' : 'N/A'),
       statRow('GPU', stats.gpu_acceleration ? (stats.gpu_device || 'Enabled') : 'Fallback/CPU'),
+      statRow('Preview protected', formatBool(data.preview_protected)),
+      statRow('Peak safety', data.peak_safety || 'Available after processing'),
       statRow('Signal changed', formatBool(stats.signal_changed)),
       statRow('Signal delta', formatSignalDelta(stats.signal_delta_ratio, stats.signal_delta_db)),
       statRow('Hash changed', formatBool(stats.output_hash_changed)),
@@ -406,8 +553,16 @@ JS_APP = """\
       statRow('Speed', stats.processing_speed || 'N/A'),
     ];
     $('statsPanel').innerHTML = rows.join('');
-    $('downloadLink').href = '/api/download/' + data.download_token;
-    $('downloadLink').download = data.filename || 'cleaned_audio';
+    if (data.download_token) {
+      $('downloadLink').hidden = false;
+      $('downloadLink').href = '/api/download/' + data.download_token;
+      $('downloadLink').download = data.filename || 'master_audio';
+    } else {
+      $('downloadLink').hidden = true;
+    }
+    setReportLink('jsonReportLink', data.report_artifacts && data.report_artifacts.json_download_token);
+    setReportLink('htmlReportLink', data.report_artifacts && data.report_artifacts.html_download_token);
+    setTimeline(['upload','metadata','loudness','dc','spectrum','render','limit','report']);
   }
 
   function showError(msg) {
@@ -416,6 +571,7 @@ JS_APP = """\
     error.hidden = false;
     $('errorText').textContent = msg;
     $('processBtn').disabled = false;
+    setTimeline([]);
   }
 
   $('resetBtn').addEventListener('click', resetUI);
@@ -431,6 +587,102 @@ JS_APP = """\
     result.hidden = true;
     error.hidden = true;
     $('processBtn').disabled = false;
+    resetMetrics();
+    drawWavePlaceholder();
+  }
+
+  function setReportLink(id, token) {
+    const link = $(id);
+    if (!token) {
+      link.hidden = true;
+      return;
+    }
+    link.hidden = false;
+    link.href = '/api/download/' + token;
+  }
+
+  function updateMetrics(data) {
+    const before = data.metrics_before || {};
+    const after = data.metrics_after || before;
+    const metrics = after || {};
+    $('metricLufs').textContent = formatMetric(metrics.integrated_lufs, ' LUFS');
+    $('metricPeak').textContent = formatMetric(metrics.estimated_true_peak_dbtp, ' dBTP');
+    $('metricPlr').textContent = formatMetric(metrics.peak_to_loudness_ratio, ' dB');
+    $('metricStereo').textContent = formatMetric(metrics.stereo_correlation, '');
+    $('metricDc').textContent = Array.isArray(metrics.dc_offset) ? metrics.dc_offset.map(v => Number(v).toExponential(2)).join(' / ') : 'Not measured';
+    $('metricClipping').textContent = metrics.clipping_sample_count == null ? 'Not measured' : String(metrics.clipping_sample_count);
+    $('metricLowWidth').textContent = formatMetric(metrics.low_end_width, '');
+    const harsh = metrics.band_energy && metrics.band_energy.harsh_5000_9000_hz;
+    $('metricHarsh').textContent = harsh == null ? 'Not measured' : riskLabel(harsh, 0.18);
+    const score = metrics.release_readiness && metrics.release_readiness.score;
+    $('metricReadiness').textContent = score == null ? 'Available after processing' : score + '/100';
+    if (metrics.integrated_lufs != null) {
+      const width = Math.max(0, Math.min(100, (Number(metrics.integrated_lufs) + 30) / 20 * 100));
+      $('lufsMeterFill').style.width = width + '%';
+    }
+    updateBands(metrics.band_energy || {});
+  }
+
+  function resetMetrics() {
+    ['metricPeak','metricPlr','metricStereo','metricDc','metricClipping','metricLowWidth','metricHarsh'].forEach(id => $(id).textContent = 'Not measured yet');
+    $('metricLufs').textContent = 'Pending analysis';
+    $('metricReadiness').textContent = 'Available after processing';
+    $('lufsMeterFill').style.width = '0%';
+    updateBands({});
+  }
+
+  function updateBands(bands) {
+    $('bandSub').textContent = formatBand(bands.sub_20_60_hz);
+    $('bandLowMid').textContent = formatBand(bands.low_mid_120_350_hz);
+    $('bandPresence').textContent = formatBand(bands.presence_2000_5000_hz);
+    $('bandHarsh').textContent = formatBand(bands.harsh_5000_9000_hz);
+    $('bandAir').textContent = formatBand(bands.air_9000_16000_hz);
+  }
+
+  function setTimeline(steps) {
+    const done = new Set(Array.isArray(steps) ? steps : []);
+    document.querySelectorAll('#timelineList li').forEach(item => {
+      item.classList.toggle('done', done.has(item.dataset.step));
+    });
+  }
+
+  function drawWavePlaceholder(seed) {
+    const canvas = $('waveCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0,0,w,h);
+    const grd = ctx.createLinearGradient(0,0,w,0);
+    grd.addColorStop(0,'rgba(56,189,248,.85)');
+    grd.addColorStop(.55,'rgba(168,85,247,.95)');
+    grd.addColorStop(1,'rgba(34,197,94,.75)');
+    ctx.strokeStyle = grd;
+    ctx.lineWidth = 2;
+    for (let row=0; row<3; row++) {
+      ctx.beginPath();
+      for (let x=0; x<w; x+=6) {
+        const t = x / w;
+        const amp = 10 + row*5 + 12*Math.sin(t*6.28*(row+1) + (seed ? seed.length : 3));
+        const y = h/2 + Math.sin(t*35 + row*1.7) * amp * (0.35 + row*.16);
+        if (x === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.globalAlpha = .35 + row*.18;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function formatMetric(value, suffix) {
+    if (value == null || Number.isNaN(Number(value))) return 'Not measured';
+    return Number(value).toFixed(2) + suffix;
+  }
+  function formatBand(value) {
+    if (value == null) return 'Pending';
+    return (Number(value) * 100).toFixed(1) + '%';
+  }
+  function riskLabel(value, threshold) {
+    return Number(value) > threshold ? 'Review' : 'Clean';
   }
 
   function formatBytes(b) {
@@ -478,59 +730,139 @@ HTML_TEMPLATE = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MMM - Audio Sanitizer</title>
+<title>MMV2 Audio Quality Engine</title>
 <style>{css}</style>
 </head>
 <body data-max-size="{max_size}">
 <div class="app-shell">
 <header class="hero-header">
-  <div class="title-lockup">
-    <h1 class="hero-title" aria-label="Melodic Metadata Massacrer">
-      <span>Melodic Metadata</span>
-      <span>Massacrer</span>
-    </h1>
-    <span class="version-sign" aria-label="Version 2.0">2.0</span>
-  </div>
-  <p class="hero-subtitle">Browser-based audio sanitizer</p>
+  <p class="product-kicker">MMV2 Audio Quality Engine</p>
+  <h1 class="hero-title quality-hero-title">Release-Ready Stereo Mastering</h1>
+  <p class="hero-subtitle">Upload a finished stereo mix and generate a loudness-safe master with transparent quality metrics.</p>
+  <span class="beta-badge">Local engine beta</span>
 </header>
-<main>
-  <div class="legal-panel">
-    <svg class="legal-icon" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="currentColor" d="M12 2 1 21h22L12 2Zm0 6.2 5.6 9.8H6.4L12 8.2Zm-.8 2.8h1.6v4.8h-1.6V11Zm0 6.1h1.6v1.6h-1.6v-1.6Z"/>
-    </svg>
-    <p>
-      LEGAL DISCLAIMER: This tool is for AUTHORIZED SECURITY RESEARCH ONLY.
-      Use only on files you own or have explicit permission to modify.
-      You are responsible for compliance with applicable laws.
-    </p>
-  </div>
+<main class="quality-console">
+  <section class="console-card" aria-label="Mastering upload console">
+    <div class="console-topbar">
+      <div class="engine-brand">
+        <span class="logo-mark">MMV2</span>
+        <span class="engine-version">Engine {engine_version}</span>
+      </div>
+      <div class="engine-status"><span class="active-dot"></span>ENGINE ACTIVE</div>
+    </div>
 
-  <div id="dropzone" class="dropzone">
-    <div class="dropzone-content">
-      <div class="dropzone-icon">&#127925;</div>
-      <p>Drag &amp; drop audio file here</p>
-      <p class="hint">or click to select &middot; MP3, WAV, FLAC &middot; max {max_size_mb} MB</p>
-      <input type="file" id="fileInput" accept=".mp3,.wav,.flac" hidden>
+    <div id="dropzone" class="dropzone quality-dropzone">
+      <div class="dropzone-content">
+        <div class="dropzone-icon">&#9835;</div>
+        <p>Drag and drop your audio track here</p>
+        <p class="hint">WAV, FLAC, AIFF or MP3 &middot; max {max_size_mb} MB</p>
+        <input type="file" id="fileInput" accept=".mp3,.wav,.flac,.aiff,.aif" hidden>
+      </div>
+      <canvas id="waveCanvas" class="wave-canvas" width="720" height="104" aria-hidden="true"></canvas>
     </div>
-  </div>
 
-  <div id="options" class="options-panel" hidden>
-    <div class="option-group">
-      <label for="formatSelect">Output format:</label>
-      <select id="formatSelect">
-        <option value="preserve" selected>Preserve original</option>
-        <option value="mp3">MP3</option>
-        <option value="wav">WAV</option>
-        <option value="flac">FLAC</option>
-      </select>
+    <div class="console-hint-row">
+      <span>Mono and stereo accepted</span>
+      <span>Metadata parsed safely</span>
+      <span>Preview protected</span>
     </div>
-    <div class="option-group">
-      <label for="paranoidToggle">Paranoid mode:</label>
-      <input type="checkbox" id="paranoidToggle">
-      <span class="toggle-label">Maximum destruction</span>
+  </section>
+
+  <section id="options" class="control-strip" hidden>
+    <div class="control-group mode-group" role="group" aria-label="Processing mode">
+      <button class="mode-button" data-mode="analyze_only" type="button">Analyze Only</button>
+      <button class="mode-button active" data-mode="safe_master" type="button">Safe Master</button>
+      <button class="mode-button" data-mode="naturalize" type="button">Naturalize Pass</button>
+      <button class="mode-button" data-mode="full_release" type="button">Full Release Pass</button>
     </div>
-    <button id="processBtn" class="btn-primary">Sanitize with GPU</button>
-  </div>
+    <div class="control-grid">
+      <label>Output format
+        <select id="formatSelect">
+          <option value="preserve" selected>Preserve</option>
+          <option value="wav">WAV</option>
+          <option value="flac">FLAC</option>
+          <option value="mp3">MP3</option>
+        </select>
+      </label>
+      <label>Loudness target
+        <select id="loudnessTarget">
+          <option value="streaming_safe" selected>Streaming Safe</option>
+          <option value="club_loud">Club/Loud</option>
+          <option value="conservative">Conservative</option>
+        </select>
+      </label>
+      <label>True peak ceiling
+        <select id="truePeakCeiling">
+          <option value="-1.0">-1.0 dBTP</option>
+          <option value="-1.5" selected>-1.5 dBTP</option>
+          <option value="-2.0">-2.0 dBTP</option>
+        </select>
+      </label>
+      <label>Sample rate
+        <select id="sampleRateOverride">
+          <option value="preserve" selected>Preserve</option>
+          <option value="44100">44.1 kHz</option>
+          <option value="48000">48 kHz</option>
+        </select>
+      </label>
+      <label>Bit depth
+        <select id="bitDepthOverride">
+          <option value="preserve" selected>Preserve</option>
+          <option value="16">16-bit</option>
+          <option value="24">24-bit</option>
+          <option value="32">32-bit float</option>
+        </select>
+      </label>
+      <label class="advanced-toggle">Advanced legacy clean
+        <span><input type="checkbox" id="paranoidToggle"> Paranoid/GPU compatibility</span>
+      </label>
+    </div>
+    <div class="action-row">
+      <button id="processBtn" class="btn-primary">Analyze &amp; Master</button>
+      <button id="analyzeOnlyBtn" class="btn-secondary" type="button">Analyze Only</button>
+      <button id="safeMasterBtn" class="btn-secondary" type="button">Safe Master</button>
+      <button id="naturalizeBtn" class="btn-secondary" type="button">Naturalize Pass</button>
+    </div>
+  </section>
+
+  <section class="analysis-preview" aria-label="Realtime analysis preview">
+    <div class="meter-card lufs-card">
+      <span class="metric-label">Integrated LUFS</span>
+      <strong id="metricLufs">Pending analysis</strong>
+      <small id="metricTarget">Target: Streaming Safe</small>
+      <div class="lufs-meter"><span id="lufsMeterFill"></span></div>
+    </div>
+    <div class="metric-card"><span>True Peak</span><strong id="metricPeak">Not measured yet</strong></div>
+    <div class="metric-card"><span>PLR / Crest</span><strong id="metricPlr">Not measured yet</strong></div>
+    <div class="metric-card"><span>Stereo Correlation</span><strong id="metricStereo">Not measured yet</strong></div>
+    <div class="metric-card"><span>DC Offset</span><strong id="metricDc">Not measured yet</strong></div>
+    <div class="metric-card"><span>Clipping Count</span><strong id="metricClipping">Not measured yet</strong></div>
+    <div class="metric-card"><span>Low-End Width</span><strong id="metricLowWidth">Not measured yet</strong></div>
+    <div class="metric-card"><span>Harshness Risk</span><strong id="metricHarsh">Not measured yet</strong></div>
+    <div class="metric-card readiness"><span>Release Readiness</span><strong id="metricReadiness">Available after processing</strong></div>
+  </section>
+
+  <section class="spectral-risk-grid" aria-label="Spectral risk checks">
+    <div><span>Ultra Low</span><strong id="bandSub">Pending</strong></div>
+    <div><span>Low Mid</span><strong id="bandLowMid">Pending</strong></div>
+    <div><span>Presence</span><strong id="bandPresence">Pending</strong></div>
+    <div><span>Harsh</span><strong id="bandHarsh">Pending</strong></div>
+    <div><span>Air</span><strong id="bandAir">Pending</strong></div>
+  </section>
+
+  <section class="timeline-panel">
+    <h2>Processing Timeline</h2>
+    <ol id="timelineList">
+      <li data-step="upload">Upload validated</li>
+      <li data-step="metadata">Metadata parsed</li>
+      <li data-step="loudness">Loudness measured</li>
+      <li data-step="dc">DC offset checked</li>
+      <li data-step="spectrum">Low/high spectrum checked</li>
+      <li data-step="render">Master chain rendered</li>
+      <li data-step="limit">Preview limited</li>
+      <li data-step="report">Report generated</li>
+    </ol>
+  </section>
 
   <div id="status" class="status-area" hidden>
     <div class="spinner" id="spinner"></div>
@@ -542,7 +874,11 @@ HTML_TEMPLATE = """\
     <div class="success-icon">&#9989;</div>
     <p id="resultText"></p>
     <div id="statsPanel" class="stats-panel"></div>
-    <a id="downloadLink" class="btn-download" href="#">Download cleaned file</a><br>
+    <div class="download-actions">
+      <a id="downloadLink" class="btn-download" href="#">Download Master</a>
+      <a id="jsonReportLink" class="btn-download subtle" href="#" hidden>Download Report JSON</a>
+      <a id="htmlReportLink" class="btn-download subtle" href="#" hidden>Download HTML Report</a>
+    </div>
     <button id="resetBtn" class="btn-secondary">Process another file</button>
   </div>
 
@@ -553,7 +889,7 @@ HTML_TEMPLATE = """\
   </div>
 </main>
 <footer class="footer-credits">
-  <div>MMM v2.0.0 — Browser-based audio sanitizer</div>
+  <div>MMV2 Audio Quality Engine — Local stereo mastering and release checks</div>
   <div class="credit-secondary">Original open-source credit: geeknik/mmm • Retrowave redesign by Dirty D. Noir</div>
 </footer>
 </div>
@@ -639,6 +975,33 @@ def _cleanup_job_registry(
         registry.pop(token, None)
 
 
+def _parse_quality_options(form: Any) -> dict[str, Any]:
+    """Parse optional quality-engine controls with conservative defaults."""
+    loudness_target = form.get("loudness_target", "streaming_safe")
+    if loudness_target not in LOUDNESS_TARGETS:
+        loudness_target = "streaming_safe"
+
+    true_peak_ceiling = form.get("true_peak_ceiling", "-1.5")
+    if true_peak_ceiling not in TRUE_PEAK_CEILINGS:
+        true_peak_ceiling = "-1.5"
+
+    sample_rate_override = form.get("sample_rate_override", "preserve")
+    if sample_rate_override not in SAMPLE_RATE_OVERRIDES:
+        sample_rate_override = "preserve"
+
+    bit_depth_override = form.get("bit_depth_override", "preserve")
+    if bit_depth_override not in BIT_DEPTH_OVERRIDES:
+        bit_depth_override = "preserve"
+
+    return {
+        "loudness_target": loudness_target,
+        "loudness_target_label": str(LOUDNESS_TARGETS[loudness_target]["label"]),
+        "true_peak_ceiling": float(true_peak_ceiling),
+        "sample_rate_override": sample_rate_override,
+        "bit_depth_override": bit_depth_override,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Flask application factory
 # ---------------------------------------------------------------------------
@@ -676,6 +1039,7 @@ def create_app(
             js=JS_APP,
             max_size=max_file_size,
             max_size_mb=max_size_mb,
+            engine_version=ENGINE_VERSION,
         )
         return Response(html, mimetype="text/html")
 
@@ -692,8 +1056,11 @@ def create_app(
         return jsonify({
             "busy": busy,
             "version": "2.0.0",
+            "engine_version": ENGINE_VERSION,
             "max_file_size_mb": max_size_mb,
             "gpu_available": cuda_available(),
+            "quality_modes": sorted(QUALITY_MODES),
+            "loudness_targets": LOUDNESS_TARGETS,
         }), 200
 
     @app.route("/api/upload", methods=["POST"])
@@ -781,14 +1148,18 @@ def _handle_upload(app: Flask, processing_lock: threading.Lock) -> tuple:
 
     safe_name = secure_filename(f.filename)
     if not safe_name or not _validate_extension(safe_name):
-        return fail_response({"error": "Unsupported file type. Use MP3, WAV, or FLAC."}, 400)
+        return fail_response({"error": "Unsupported file type. Use WAV, FLAC, AIFF, or MP3."}, 400)
 
     # Parse options
     output_format = request.form.get("format", "preserve")
-    if output_format not in ("preserve", "mp3", "wav", "flac"):
+    if output_format not in OUTPUT_FORMATS:
         output_format = "preserve"
 
     paranoid = request.form.get("paranoid", "false").lower() == "true"
+    mode = request.form.get("mode", "legacy_sanitize")
+    if mode not in QUALITY_MODES and mode != "legacy_sanitize":
+        mode = "legacy_sanitize"
+    quality_options = _parse_quality_options(request.form)
 
     # Save to temp directory with UUID prefix
     unique_name = f"{uuid.uuid4().hex}_{safe_name}"
@@ -806,20 +1177,35 @@ def _handle_upload(app: Flask, processing_lock: threading.Lock) -> tuple:
                 "id": job_id,
                 "status": "queued",
                 "progress": 25,
-                "message": "Upload complete. Waiting for GPU worker...",
+                "message": "Upload complete. Waiting for local engine...",
                 "created": time.time(),
+                "engine_version": ENGINE_VERSION,
+                "mode": mode,
+                "output_format": output_format,
+                **quality_options,
+                "processing_steps": ["upload"],
             }
 
         worker = threading.Thread(
             target=_process_upload_job,
-            args=(app, job_id, input_path, safe_name, output_format, paranoid, processing_lock),
+            args=(
+                app,
+                job_id,
+                input_path,
+                safe_name,
+                output_format,
+                paranoid,
+                mode,
+                quality_options,
+                processing_lock,
+            ),
             daemon=True,
         )
         worker.start()
         return jsonify({
             "success": True,
             "job_id": job_id,
-            "message": "Upload accepted. GPU processing started.",
+            "message": "Upload accepted. Local processing started.",
         }), 202
     except Exception:
         input_path.unlink(missing_ok=True)
@@ -833,13 +1219,33 @@ def _process_upload_job(
     safe_name: str,
     output_format: str,
     paranoid: bool,
+    mode: str,
+    quality_options: dict[str, Any],
     processing_lock: threading.Lock,
 ) -> None:
     """Run sanitization in a background thread."""
     try:
-        _update_job(app, job_id, status="processing", progress=35, message="Starting CUDA sanitizer...")
-        fmt = None if output_format == "preserve" else output_format
-        result = _sanitize_gpu_first(app, input_path, fmt, paranoid, job_id)
+        if mode in QUALITY_MODES:
+            result = _process_quality_job(
+                app,
+                job_id,
+                input_path,
+                safe_name,
+                output_format,
+                mode,
+                quality_options,
+            )
+        else:
+            _update_job(
+                app,
+                job_id,
+                status="processing",
+                progress=35,
+                message="Starting legacy CUDA sanitizer...",
+                processing_steps=["upload", "metadata"],
+            )
+            fmt = None if output_format == "preserve" else output_format
+            result = _sanitize_gpu_first(app, input_path, fmt, paranoid, job_id)
 
         if not result.get("success"):
             _update_job(
@@ -853,30 +1259,49 @@ def _process_upload_job(
             return
 
         _update_job(app, job_id, progress=95, message="Preparing download...")
-        output_path = Path(result["output_file"])
-        token = uuid.uuid4().hex
         stem = Path(safe_name).stem
-        ext = output_path.suffix
-        download_name = f"{stem}_clean{ext}"
-
-        with app.config["DOWNLOAD_REGISTRY_LOCK"]:
-            app.config["DOWNLOAD_REGISTRY"][token] = {
-                "path": str(output_path),
-                "filename": download_name,
-                "created": time.time(),
-            }
+        token = None
+        download_name = None
+        output_path_value = result.get("output_file")
+        if output_path_value:
+            output_path = Path(output_path_value)
+            ext = output_path.suffix
+            suffix = "master" if mode in QUALITY_MODES else "clean"
+            download_name = f"{stem}_{suffix}{ext}"
+            token = _register_download(app, output_path, download_name)
 
         _update_job(
             app,
             job_id,
             status="complete",
             progress=100,
-            message="Sanitization complete.",
+            message="Processing complete.",
+            processing_steps=[
+                "upload",
+                "metadata",
+                "loudness",
+                "dc",
+                "spectrum",
+                "render",
+                "limit",
+                "report",
+            ],
             result={
                 "success": True,
+                "engine_version": ENGINE_VERSION,
+                "mode": mode,
+                "output_format": output_format,
+                **quality_options,
                 "download_token": token,
                 "filename": download_name,
                 "stats": result.get("stats", {}),
+                "metrics_before": result.get("metrics_before"),
+                "metrics_after": result.get("metrics_after"),
+                "waveform_artifact": result.get("waveform_artifact"),
+                "report_artifacts": result.get("report_artifacts", {}),
+                "processing_steps": result.get("processing_steps", []),
+                "preview_protected": result.get("preview_protected"),
+                "peak_safety": result.get("peak_safety"),
             },
         )
     except Exception as exc:
@@ -934,6 +1359,197 @@ def _sanitize_gpu_first(
         stats["gpu_acceleration"] = False
         stats["gpu_fallback_error"] = str(exc)
         return result
+
+
+def _process_quality_job(
+    app: Flask,
+    job_id: str,
+    input_path: Path,
+    safe_name: str,
+    output_format: str,
+    mode: str,
+    quality_options: dict[str, Any],
+) -> Dict[str, Any]:
+    """Run the local audio quality engine for web jobs."""
+    from audio_engine.analysis.readiness import analyze_quality
+    from audio_engine.dsp.pipeline import render_safe_master
+    from audio_engine.guardrails.limits import DEFAULT_LIMITS, GuardrailLimits
+    from audio_engine.naturalize.movement import render_naturalized_master
+    from audio_engine.reports.html_report import write_html_report
+    from audio_engine.reports.json_report import write_json_report
+
+    temp_dir: Path = app.config["UPLOAD_FOLDER"]
+    stem = Path(safe_name).stem
+    output_ext = _quality_output_extension(input_path, output_format)
+    output_path = temp_dir / f"{uuid.uuid4().hex}_{stem}.master{output_ext}"
+    json_report_path = temp_dir / f"{uuid.uuid4().hex}_{stem}.quality.json"
+    html_report_path = temp_dir / f"{uuid.uuid4().hex}_{stem}.quality.html"
+    waveform_path = temp_dir / f"{uuid.uuid4().hex}_{stem}.waveform.json"
+
+    limits = GuardrailLimits(
+        **{
+            **DEFAULT_LIMITS.to_dict(),
+            "limiter_ceiling_dbtp": float(quality_options["true_peak_ceiling"]),
+            "export_default_bit_depth": _bit_depth_for_writer(
+                str(quality_options["bit_depth_override"])
+            ),
+        }
+    )
+
+    _update_job(
+        app,
+        job_id,
+        status="processing",
+        progress=35,
+        message="Metadata parsed safely. Measuring loudness...",
+        processing_steps=["upload", "metadata", "loudness"],
+    )
+    before = analyze_quality(input_path)
+    waveform_token = None
+    try:
+        waveform = _build_waveform_artifact(input_path)
+        write_json_report(waveform, waveform_path)
+        waveform_token = _register_download(app, waveform_path, f"{stem}_waveform.json")
+    except Exception as exc:
+        app.logger.info("Waveform artifact skipped: %s", exc)
+
+    if mode == "analyze_only":
+        report = {
+            "action": "analyze_only",
+            "input": str(input_path),
+            "engine_version": ENGINE_VERSION,
+            "mode": mode,
+            "quality_options": quality_options,
+            "metrics": before,
+            "metrics_before": before,
+            "metrics_after": before,
+            "processing_steps": ["upload", "metadata", "loudness", "dc", "spectrum", "report"],
+        }
+    else:
+        _update_job(
+            app,
+            job_id,
+            progress=62,
+            message="Rendering conservative master chain...",
+            processing_steps=["upload", "metadata", "loudness", "dc", "spectrum", "render"],
+        )
+        if mode == "naturalize":
+            report = render_naturalized_master(input_path, output_path, limits=limits)
+        else:
+            report = render_safe_master(input_path, output_path, limits=limits)
+
+    report["engine_version"] = ENGINE_VERSION
+    report["mode"] = mode
+    report["output_format"] = output_format
+    report["quality_options"] = quality_options
+    report["sample_rate_override"] = quality_options["sample_rate_override"]
+    report["bit_depth_override"] = quality_options["bit_depth_override"]
+
+    _update_job(
+        app,
+        job_id,
+        progress=82,
+        message="Generating quality reports...",
+        processing_steps=["upload", "metadata", "loudness", "dc", "spectrum", "render", "limit", "report"],
+    )
+    write_json_report(report, json_report_path)
+    write_html_report(report if mode != "analyze_only" else {"metrics": before}, html_report_path)
+    json_token = _register_download(app, json_report_path, f"{stem}_quality_report.json")
+    html_token = _register_download(app, html_report_path, f"{stem}_quality_report.html")
+
+    metrics_before = report.get("before") or report.get("metrics_before") or before
+    metrics_after = report.get("after") or report.get("metrics_after") or metrics_before
+    loudness_delta = None
+    if metrics_before and metrics_after:
+        loudness_delta = float(metrics_after["integrated_lufs"] - metrics_before["integrated_lufs"])
+
+    stats = {
+        "processing_engine": "mmv2_audio_quality_engine",
+        "gpu_acceleration": False,
+        "metadata_removed": 0,
+        "integrated_lufs": metrics_after.get("integrated_lufs"),
+        "short_term_lufs_curve": metrics_after.get("short_term_loudness_curve"),
+        "true_peak_dbtp": metrics_after.get("estimated_true_peak_dbtp"),
+        "loudness_target": quality_options["loudness_target"],
+        "loudness_delta": loudness_delta,
+        "channels": metrics_after.get("channels"),
+        "sample_rate": metrics_after.get("sample_rate"),
+        "dc_offset": metrics_after.get("dc_offset"),
+        "clipping_sample_count": metrics_after.get("clipping_sample_count"),
+    }
+
+    output_file = None if mode == "analyze_only" else str(output_path)
+    return {
+        "success": True,
+        "output_file": output_file,
+        "stats": stats,
+        "metrics_before": metrics_before,
+        "metrics_after": metrics_after,
+        "waveform_artifact": {
+            "json_download_token": waveform_token,
+        } if waveform_token else None,
+        "report_artifacts": {
+            "json_download_token": json_token,
+            "html_download_token": html_token,
+        },
+        "processing_steps": report.get("processing_steps", []),
+        "preview_protected": mode != "analyze_only",
+        "peak_safety": "Protected" if mode != "analyze_only" else "Analysis only",
+    }
+
+
+def _register_download(app: Flask, file_path: Path, filename: str) -> str:
+    """Register a downloadable artifact and return its token."""
+    token = uuid.uuid4().hex
+    with app.config["DOWNLOAD_REGISTRY_LOCK"]:
+        app.config["DOWNLOAD_REGISTRY"][token] = {
+            "path": str(file_path),
+            "filename": filename,
+            "created": time.time(),
+        }
+    return token
+
+
+def _quality_output_extension(input_path: Path, output_format: str) -> str:
+    """Choose a safe local output extension for the quality engine."""
+    if output_format in {"wav", "flac"}:
+        return f".{output_format}"
+    if output_format == "preserve" and input_path.suffix.lower() in {".wav", ".flac", ".aiff", ".aif"}:
+        return input_path.suffix.lower()
+    return ".wav"
+
+
+def _bit_depth_for_writer(bit_depth_override: str) -> int:
+    if bit_depth_override == "16":
+        return 16
+    if bit_depth_override == "32":
+        return 32
+    return 24
+
+
+def _build_waveform_artifact(input_path: Path, points: int = 240) -> dict[str, Any]:
+    """Build lightweight waveform peaks/RMS arrays for frontend/report use."""
+    import numpy as np
+    import soundfile as sf
+
+    audio, sample_rate = sf.read(str(input_path), dtype="float32", always_2d=True)
+    mono = np.mean(audio, axis=1)
+    if mono.size == 0:
+        raise ValueError("Cannot build waveform for empty audio.")
+    chunk = max(1, int(np.ceil(mono.size / points)))
+    peaks = []
+    rms = []
+    for start in range(0, mono.size, chunk):
+        frame = mono[start : start + chunk]
+        peaks.append(float(np.max(np.abs(frame))) if frame.size else 0.0)
+        rms.append(float(np.sqrt(np.mean(frame**2))) if frame.size else 0.0)
+    return {
+        "peaks": peaks,
+        "rms": rms,
+        "duration": float(mono.size / sample_rate),
+        "sample_rate": int(sample_rate),
+        "channels": int(audio.shape[1]),
+    }
 
 
 def _update_job(app: Flask, job_id: str, **updates: Any) -> None:

@@ -975,6 +975,147 @@ def server(host, port, max_size):
     run_server(host=host, port=port, max_file_size=max_file_size)
 
 
+@cli.command("analyze-quality")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--out", "json_out", type=click.Path(path_type=Path), required=True)
+@click.option("--html", "html_out", type=click.Path(path_type=Path))
+def analyze_quality_command(input_file, json_out, html_out):
+    """
+    🎚️ Analyze stereo release quality and write a JSON/HTML report
+
+    Example:
+
+        mmm analyze-quality input.wav --out report.json --html report.html
+    """
+    from audio_engine.analysis.readiness import analyze_quality
+    from audio_engine.reports.html_report import write_html_report
+    from audio_engine.reports.json_report import write_json_report
+
+    try:
+        report = analyze_quality(input_file)
+        write_json_report(report, json_out)
+        if html_out:
+            write_html_report({"metrics": report}, html_out)
+        readiness = report["release_readiness"]
+        console.success(f"✅ Quality report written: {json_out}")
+        console.info(
+            f"   Release readiness: {readiness['score']}/100 ({readiness['grade']})"
+        )
+    except Exception as e:
+        console.error(f"❌ Quality analysis failed: {e}")
+        raise click.ClickException(str(e)) from e
+
+
+@cli.command("safe-master")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--out", "output_file", type=click.Path(path_type=Path), required=True)
+@click.option("--report", "report_path", type=click.Path(path_type=Path), required=True)
+@click.option("--html", "html_out", type=click.Path(path_type=Path))
+def safe_master_command(input_file, output_file, report_path, html_out):
+    """
+    🎛️ Render a conservative local safe master
+
+    Example:
+
+        mmm safe-master input.wav --out master.wav --report report.json
+    """
+    from audio_engine.dsp.pipeline import render_safe_master
+    from audio_engine.reports.html_report import write_html_report
+    from audio_engine.reports.json_report import write_json_report
+
+    try:
+        report = render_safe_master(input_file, output_file)
+        write_json_report(report, report_path)
+        if html_out:
+            write_html_report(report, html_out)
+        console.success(f"✅ Safe master written: {output_file}")
+        console.info(f"   Report: {report_path}")
+    except Exception as e:
+        console.error(f"❌ Safe master failed: {e}")
+        raise click.ClickException(str(e)) from e
+
+
+@cli.command("naturalize")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--out", "output_file", type=click.Path(path_type=Path), required=True)
+@click.option("--report", "report_path", type=click.Path(path_type=Path), required=True)
+@click.option("--html", "html_out", type=click.Path(path_type=Path))
+def naturalize_command(input_file, output_file, report_path, html_out):
+    """
+    🌊 Render a subtle segment-automation naturalized master
+
+    Example:
+
+        mmm naturalize input.wav --out naturalized_master.wav --report report.json
+    """
+    from audio_engine.naturalize.movement import render_naturalized_master
+    from audio_engine.reports.html_report import write_html_report
+    from audio_engine.reports.json_report import write_json_report
+
+    try:
+        report = render_naturalized_master(input_file, output_file)
+        write_json_report(report, report_path)
+        if html_out:
+            write_html_report(report, html_out)
+        console.success(f"✅ Naturalized master written: {output_file}")
+        console.info(f"   Automation points: {len(report.get('automation', []))}")
+    except Exception as e:
+        console.error(f"❌ Naturalize failed: {e}")
+        raise click.ClickException(str(e)) from e
+
+
+@cli.command("compare-master")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.argument("master_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--out", "json_out", type=click.Path(path_type=Path), required=True)
+@click.option("--html", "html_out", type=click.Path(path_type=Path))
+def compare_master_command(input_file, master_file, json_out, html_out):
+    """
+    📊 Compare an original file against a rendered master
+
+    Example:
+
+        mmm compare-master input.wav master.wav --out before_after.json
+    """
+    from audio_engine.reports.before_after import compare_masters
+    from audio_engine.reports.html_report import write_html_report
+    from audio_engine.reports.json_report import write_json_report
+
+    try:
+        report = compare_masters(input_file, master_file)
+        write_json_report(report, json_out)
+        if html_out:
+            write_html_report(report, html_out)
+        console.success(f"✅ Before/after report written: {json_out}")
+    except Exception as e:
+        console.error(f"❌ Compare failed: {e}")
+        raise click.ClickException(str(e)) from e
+
+
+@cli.command("reference-qc")
+@click.argument("target_file", type=click.Path(exists=True, path_type=Path))
+@click.argument("reference_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--out", "json_out", type=click.Path(path_type=Path), required=True)
+def reference_qc_command(target_file, reference_file, json_out):
+    """
+    🧭 Compare target and reference metrics without copying the reference
+
+    Example:
+
+        mmm reference-qc target.wav reference.wav --out reference_report.json
+    """
+    from audio_engine.reference.reference_metrics import reference_qc
+    from audio_engine.reports.json_report import write_json_report
+
+    try:
+        report = reference_qc(target_file, reference_file)
+        write_json_report(report, json_out)
+        console.success(f"✅ Reference QC report written: {json_out}")
+    except Exception as e:
+        console.error(f"❌ Reference QC failed: {e}")
+        raise click.ClickException(str(e)) from e
+
+
 @cli.command()
 def version():
     """

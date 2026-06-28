@@ -1,0 +1,6 @@
+{
+  "name": "safe_release",
+  "target_lufs": -14.0,
+  "limiter_ceiling_dbtp": -1.5,
+  "mono_bass_hz": 100.0
+}

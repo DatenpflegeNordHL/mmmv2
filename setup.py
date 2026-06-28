@@ -10,6 +10,7 @@ setup(
     author="Security Research Team",
     url="https://github.com/research/mmm",
     packages=find_packages(),
+    package_data={"audio_engine": ["presets/*.json"]},
     install_requires=[
         "click>=8.1.0",
         "mutagen>=1.47.0",
@@ -28,6 +29,7 @@ setup(
     entry_points={
         "console_scripts": [
             "mmm=mmm.cli:cli",
+            "mmv2=mmm.cli:cli",
         ],
     },
     python_requires=">=3.9",
