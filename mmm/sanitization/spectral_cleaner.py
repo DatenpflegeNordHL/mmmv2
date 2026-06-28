@@ -6,7 +6,7 @@ import logging
 import numpy as np
 from scipy import signal
 from scipy.fft import fft, ifft, fftfreq
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Tuple
 import librosa
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ class SpectralCleaner:
         self.max_notch_filters = 20 if paranoid_mode else 12
         self.max_verification_samples = 131072
         self.max_autocorr_samples = 16384
+        self.max_spectral_delta_ratio = 0.12 if paranoid_mode else 0.08
         self.watermark_freq_bands = [
             (18000, 18500),  # Known AI watermark ranges
             (19000, 19500),
@@ -38,7 +39,10 @@ class SpectralCleaner:
         ]
 
     def clean_watermarks(
-        self, audio_data: np.ndarray, sample_rate: int
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        detector_findings: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Remove spectral watermarks from audio
@@ -56,6 +60,7 @@ class SpectralCleaner:
             "watermarks_removed": 0,
             "methods_used": [],
             "details": [],
+            "modified_regions": [],
         }
 
         # Ensure stereo handling
@@ -67,6 +72,14 @@ class SpectralCleaner:
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
             cleaned_channel = channel_data.copy()
+
+            targeted_result = self._apply_targeted_masks(
+                cleaned_channel, sample_rate, detector_findings, channel_idx
+            )
+            cleaned_channel = targeted_result["cleaned_data"]
+            if targeted_result["modified_regions"]:
+                result["methods_used"].append("targeted_detector_masks")
+                result["modified_regions"].extend(targeted_result["modified_regions"])
 
             # Method 1: High-frequency watermark removal
             watermark_result = self._remove_high_frequency_watermarks(
@@ -98,6 +111,13 @@ class SpectralCleaner:
                 cleaned_channel = noise_result["cleaned_data"]
                 result["methods_used"].append("noise_shaping")
 
+            limited_channel, distance_info = self._limit_spectral_distance(
+                channel_data, cleaned_channel
+            )
+            cleaned_channel = limited_channel
+            if distance_info:
+                result["details"].append(distance_info)
+
             cleaned_channels.append(cleaned_channel)
 
         # Reconstruct multi-channel audio
@@ -112,6 +132,131 @@ class SpectralCleaner:
         )
 
         return result
+
+    def _extract_target_bands(
+        self,
+        detector_findings: Optional[Dict[str, Any]],
+        sample_rate: int,
+        channel_idx: int,
+    ) -> List[Dict[str, Any]]:
+        """Translate detector details into frequency bands to attenuate."""
+        if not detector_findings:
+            return []
+
+        nyquist = sample_rate / 2
+        bands: List[Dict[str, Any]] = []
+        for finding in detector_findings.get("detected", []):
+            method = finding.get("method", "unknown")
+            for detail in finding.get("details", []):
+                detail_channel = detail.get("channel")
+                if detail_channel is not None and detail_channel != channel_idx:
+                    continue
+
+                if "frequency" in detail:
+                    freq = float(detail["frequency"])
+                    bands.append(
+                        {
+                            "method": method,
+                            "source": detail.get("type", "detector_frequency"),
+                            "start_hz": max(20.0, freq - 125.0),
+                            "end_hz": min(nyquist - 1.0, freq + 125.0),
+                        }
+                    )
+                elif detail.get("type") in {
+                    "high_frequency_pattern",
+                    "spectral_flatness_anomaly",
+                    "consistent_spectral_peaks",
+                }:
+                    bands.append(
+                        {
+                            "method": method,
+                            "source": detail.get("type"),
+                            "start_hz": min(15000.0, nyquist * 0.75),
+                            "end_hz": min(nyquist - 1.0, 21500.0),
+                        }
+                    )
+
+        return [
+            band
+            for band in bands
+            if band["end_hz"] > band["start_hz"] and band["start_hz"] < nyquist
+        ]
+
+    def _apply_targeted_masks(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        detector_findings: Optional[Dict[str, Any]],
+        channel_idx: int,
+    ) -> Dict[str, Any]:
+        """Apply detector-driven frequency masks and record exact modified bands."""
+        result = {"cleaned_data": audio_data.copy(), "modified_regions": []}
+        target_bands = self._extract_target_bands(
+            detector_findings, sample_rate, channel_idx
+        )
+        if not target_bands or audio_data.size == 0:
+            return result
+
+        fft_data = fft(audio_data)
+        freqs = fftfreq(len(audio_data), 1 / sample_rate)
+        fft_mod = fft_data.copy()
+        attenuation = 0.18 if self.paranoid_mode else 0.35
+
+        for band in target_bands:
+            mask = (np.abs(freqs) >= band["start_hz"]) & (
+                np.abs(freqs) <= band["end_hz"]
+            )
+            if not np.any(mask):
+                continue
+            before_power = float(np.mean(np.abs(fft_mod[mask]) ** 2))
+            fft_mod[mask] *= attenuation
+            after_power = float(np.mean(np.abs(fft_mod[mask]) ** 2))
+            result["modified_regions"].append(
+                {
+                    "channel": channel_idx,
+                    "method": band["method"],
+                    "source": band["source"],
+                    "start_hz": float(band["start_hz"]),
+                    "end_hz": float(band["end_hz"]),
+                    "attenuation": attenuation,
+                    "pre_power": before_power,
+                    "post_power": after_power,
+                }
+            )
+
+        result["cleaned_data"] = np.real(ifft(fft_mod))
+        return result
+
+    def _limit_spectral_distance(
+        self, original: np.ndarray, candidate: np.ndarray
+    ) -> Tuple[np.ndarray, Optional[Dict[str, Any]]]:
+        """Blend back toward original when spectral change exceeds the profile limit."""
+        if original.size == 0 or candidate.size == 0:
+            return candidate, None
+
+        original_mag = np.abs(np.fft.rfft(original))
+        candidate_mag = np.abs(np.fft.rfft(candidate))
+        spectral_distance = float(
+            np.mean(np.abs(candidate_mag - original_mag))
+            / (np.mean(original_mag) + 1e-10)
+        )
+        if spectral_distance <= self.max_spectral_delta_ratio:
+            return candidate, {
+                "metric": "spectral_distance",
+                "value": spectral_distance,
+                "limit": self.max_spectral_delta_ratio,
+                "limited": False,
+            }
+
+        blend = self.max_spectral_delta_ratio / max(spectral_distance, 1e-12)
+        limited = original + (candidate - original) * blend
+        return limited, {
+            "metric": "spectral_distance",
+            "value": spectral_distance,
+            "limit": self.max_spectral_delta_ratio,
+            "limited": True,
+            "blend": float(blend),
+        }
 
     def _remove_high_frequency_watermarks(
         self, audio_data: np.ndarray, sample_rate: int

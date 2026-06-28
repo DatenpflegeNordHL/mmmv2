@@ -20,11 +20,16 @@ from mmm.config.config_manager import ConfigManager
 from mmm.config.defaults import DEFAULT_CONFIG
 from mmm.core.audio_sanitizer import AudioSanitizer
 from mmm.detection.metadata_scanner import MetadataScanner
+from mmm.detection.watermark_detector import WatermarkDetector
+from mmm.forensic_report import write_forensic_report
 from mmm.gpu_web_sanitizer import _verify_signal_delta
 from mmm.optimized_processor import OptimizedAudioProcessor
+from mmm.optimized_processor import GPUAcceleratedWatermarkDetector
 from mmm.preserving_sanitizer import preserving_sanitize
 from mmm.server import create_app
+from mmm.sanitization.fingerprint_remover import FingerprintRemover
 from mmm.sanitization.metadata_cleaner import MetadataCleaner
+from mmm.sanitization.spectral_cleaner import SpectralCleaner
 from mmm.turbo_analysis import turbo_analysis
 
 
@@ -88,7 +93,7 @@ def test_sanitize_audio_loads_once_and_uses_single_final_output(tmp_path):
     )
     sanitizer.metadata_cleaner = RecordingMetadataCleaner()
     sanitizer.spectral_cleaner = SimpleNamespace(
-        clean_watermarks=lambda audio, _sr: {
+        clean_watermarks=lambda audio, _sr, **_kwargs: {
             "cleaned_audio": audio,
             "watermarks_found": 0,
             "watermarks_removed": 0,
@@ -98,6 +103,7 @@ def test_sanitize_audio_loads_once_and_uses_single_final_output(tmp_path):
         remove_fingerprints=lambda audio, _sr: {"cleaned_audio": audio}
     )
     def fake_save_audio(_audio, output_file=None):
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_bytes(b"clean")
 
     sanitizer._save_audio = fake_save_audio
@@ -164,6 +170,7 @@ def test_massacre_uses_worker_threads(monkeypatch, tmp_path):
         time.sleep(0.01)
         return {"success": True, "mode": "turbo", "output_file": str(file_path)}
 
+    monkeypatch.setattr(cli_module, "_cuda_available_for_worker_limit", lambda: False)
     monkeypatch.setattr(cli_module, "_process_massacre_file", fake_process)
 
     result = CliRunner().invoke(
@@ -173,6 +180,50 @@ def test_massacre_uses_worker_threads(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert any(name != "MainThread" for name in thread_names)
+
+
+def test_massacre_recursive_finds_flac_by_default(monkeypatch, tmp_path):
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    input_file = nested / "track.flac"
+    input_file.write_bytes(b"audio")
+    seen = []
+
+    def fake_process(file_path, output_dir, paranoid, backup, turbo):
+        seen.append(file_path)
+        return {"success": True, "mode": "regular", "output_file": str(file_path)}
+
+    monkeypatch.setattr(cli_module, "_process_massacre_file", fake_process)
+
+    result = CliRunner().invoke(
+        cli,
+        ["massacre", str(tmp_path), "--recursive", "--workers", "1", "--no-turbo"],
+    )
+
+    assert result.exit_code == 0
+    assert seen == [input_file]
+
+
+def test_turbo_massacre_limits_workers_when_cuda_available(monkeypatch, tmp_path):
+    for index in range(3):
+        (tmp_path / f"track{index}.wav").write_bytes(b"audio")
+    thread_names = []
+
+    def fake_process(file_path, output_dir, paranoid, backup, turbo):
+        thread_names.append(threading.current_thread().name)
+        return {"success": True, "mode": "turbo", "output_file": str(file_path)}
+
+    monkeypatch.setattr(cli_module, "_cuda_available_for_worker_limit", lambda: True)
+    monkeypatch.setattr(cli_module, "_process_massacre_file", fake_process)
+
+    result = CliRunner().invoke(
+        cli,
+        ["massacre", str(tmp_path), "--workers", "3", "--turbo"],
+    )
+
+    assert result.exit_code == 0
+    assert set(thread_names) == {"MainThread"}
+    assert "limiting workers to 1" in result.output.lower()
 
 
 def test_massacre_exits_nonzero_when_any_file_fails(monkeypatch, tmp_path):
@@ -252,7 +303,8 @@ def test_import_config_rejects_non_mapping_yaml(tmp_path):
 
 
 def test_cli_module_import_does_not_create_global_config():
-    assert not hasattr(cli_module, "config")
+    assert "config_manager" not in vars(cli_module)
+    assert callable(cli_module.config)
 
 
 def test_preserving_sanitize_accepts_string_input_for_missing_file(tmp_path):
@@ -367,8 +419,8 @@ def test_setup_py_matches_runtime_requirements_for_audio_paths():
 
 
 def test_generic_metadata_cleaner_fails_closed_without_copy(monkeypatch, tmp_path):
-    input_file = tmp_path / "input.flac"
-    output_file = tmp_path / "output.flac"
+    input_file = tmp_path / "input.ogg"
+    output_file = tmp_path / "output.ogg"
     input_file.write_bytes(b"metadata-bearing original")
 
     monkeypatch.setattr(
@@ -383,12 +435,157 @@ def test_generic_metadata_cleaner_fails_closed_without_copy(monkeypatch, tmp_pat
     assert not output_file.exists()
 
 
+def test_flac_metadata_cleaner_uses_native_flac_verification(monkeypatch, tmp_path):
+    input_file = tmp_path / "input.flac"
+    output_file = tmp_path / "output.flac"
+    input_file.write_bytes(b"flac bytes")
+    cleaned_paths = set()
+
+    class FakeFLAC:
+        def __init__(self, path):
+            self.path = Path(path)
+            self.tags = {} if self.path in cleaned_paths else {"TITLE": ["secret"]}
+            self.pictures = [] if self.path in cleaned_paths else [object()]
+
+        def clear(self):
+            self.tags = {}
+
+        def clear_pictures(self):
+            self.pictures = []
+
+        def save(self):
+            cleaned_paths.add(self.path)
+
+    monkeypatch.setattr("mmm.sanitization.metadata_cleaner.FLAC", FakeFLAC)
+
+    result = MetadataCleaner().clean_file(input_file, output_file)
+
+    assert result["success"] is True
+    assert "flac_mutagen_clear" in result["methods_used"]
+    assert MetadataCleaner()._verify_metadata_present(output_file) is False
+
+
+def test_wav_metadata_verifier_detects_custom_chunks(tmp_path):
+    wav_file = tmp_path / "custom.wav"
+    fmt_chunk = b"fmt " + (16).to_bytes(4, "little") + b"\x01\x00\x01\x00" + b"\x40\x1f\x00\x00" + b"\x80>\x00\x00" + b"\x02\x00\x10\x00"
+    junk_chunk = b"JUNK" + (4).to_bytes(4, "little") + b"test"
+    data_chunk = b"data" + (2).to_bytes(4, "little") + b"\x00\x00"
+    payload = b"WAVE" + fmt_chunk + junk_chunk + data_chunk
+    wav_file.write_bytes(b"RIFF" + (len(payload)).to_bytes(4, "little") + payload)
+
+    assert MetadataCleaner()._verify_metadata_present(wav_file) is True
+
+
 def test_metadata_verification_handles_small_files(monkeypatch, tmp_path):
     tiny_file = tmp_path / "tiny.bin"
     tiny_file.write_bytes(b"small")
     monkeypatch.setattr("mmm.sanitization.metadata_cleaner.MutagenFile", lambda _p: None)
 
     assert MetadataCleaner()._verify_metadata_present(tiny_file) is False
+
+
+def test_watermark_detector_marks_results_as_heuristic():
+    rng = np.random.default_rng(123)
+    audio = rng.normal(0, 0.01, size=(8192, 1)).astype(np.float32)
+
+    results = WatermarkDetector().detect_all(audio, 44100)
+
+    assert results["method_results"]
+    for method_result in results["method_results"].values():
+        assert method_result["heuristic_indicator"] is True
+        assert method_result["detector_type"] == "heuristic_threshold"
+        assert "calibration" in method_result
+        assert "evidence_metrics" in method_result
+
+
+def test_gpu_spectral_detector_returns_evidence_in_cpu_fallback():
+    detector = GPUAcceleratedWatermarkDetector()
+    detector.gpu_available = False
+    audio = np.random.default_rng(1).normal(0, 0.01, 8192).astype(np.float32)
+
+    result = detector.detect_spectral_patterns_gpu(audio, 44100)
+
+    assert result["heuristic_indicator"] is True
+    assert result["detector_type"] == "heuristic_threshold"
+    assert "high_frequency_ratio" in result["evidence_metrics"]
+
+
+def test_spectral_cleaner_records_targeted_detector_masks():
+    sr = 44100
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    audio = (0.1 * np.sin(2 * np.pi * 18000 * t)).astype(np.float32).reshape(-1, 1)
+    findings = {
+        "detected": [
+            {
+                "method": "spread_spectrum",
+                "details": [
+                    {
+                        "channel": 0,
+                        "frequency": 18000,
+                        "type": "suspicious_frequency",
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = SpectralCleaner().clean_watermarks(audio, sr, detector_findings=findings)
+
+    assert "targeted_detector_masks" in result["methods_used"]
+    assert result["modified_regions"]
+    assert result["modified_regions"][0]["start_hz"] < 18000
+    assert result["modified_regions"][0]["end_hz"] > 18000
+
+
+def test_micro_timing_perturbation_moves_transient(monkeypatch):
+    remover = FingerprintRemover()
+    sr = 8000
+    audio = np.zeros(sr, dtype=np.float32)
+    audio[1000] = 1.0
+
+    monkeypatch.setattr(np.random, "randint", lambda *_args, **_kwargs: 5)
+
+    result = remover._micro_timing_perturbation(audio, sr)["cleaned_data"]
+
+    assert int(np.argmax(result)) != 1000
+
+
+def test_fingerprint_quality_metrics_do_not_broadcast_mono_channel():
+    remover = FingerprintRemover()
+    sr = 8000
+    t = np.linspace(0, 0.25, int(sr * 0.25), endpoint=False)
+    original = (0.1 * np.sin(2 * np.pi * 440 * t)).astype(np.float32).reshape(-1, 1)
+    cleaned = original[:, 0].copy()
+
+    metrics = remover._calculate_quality_metrics(original, cleaned, sr)
+
+    assert metrics["quality_preservation"] >= 0.0
+    assert np.isfinite(metrics["mfcc_distance"])
+
+
+def test_forensic_report_records_hashes_and_methods(tmp_path):
+    input_file = tmp_path / "input.wav"
+    output_file = tmp_path / "output.wav"
+    input_file.write_bytes(b"input")
+    output_file.write_bytes(b"output")
+    stats = {
+        "processing_engine": "test",
+        "methods_used": ["a", "b"],
+        "passes_run": 2,
+        "signal_changed": True,
+    }
+
+    report_path = write_forensic_report(
+        input_file,
+        output_file,
+        stats,
+        metadata_clean=True,
+        signal_delta={"signal_changed": True},
+    )
+
+    report_text = report_path.read_text(encoding="utf-8")
+    assert '"hash_changed": true' in report_text
+    assert '"methods_used": [' in report_text
 
 
 def test_server_rejects_extension_only_fake_audio_upload():
@@ -532,6 +729,41 @@ def test_server_upload_runs_gpu_background_job(monkeypatch):
     assert payload["status"] == "complete"
     assert payload["result"]["stats"]["processing_engine"] == "gpu_cuda_web"
     assert payload["result"]["stats"]["gpu_acceleration"] is True
+
+
+def test_server_upload_accepts_flac_output_option(monkeypatch):
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+    seen = {}
+
+    monkeypatch.setattr(server_module, "_validate_audio_content", lambda _path: True)
+
+    def fake_gpu_web_sanitize(input_file, output_file=None, **kwargs):
+        seen["output_format"] = kwargs["output_format"]
+        output_path = Path(input_file).with_suffix(".clean.flac")
+        output_path.write_bytes(b"clean")
+        return {
+            "success": True,
+            "output_file": str(output_path),
+            "stats": {"processing_engine": "gpu_cuda_web"},
+        }
+
+    monkeypatch.setattr(server_module, "gpu_web_sanitize", fake_gpu_web_sanitize)
+
+    response = client.post(
+        "/api/upload",
+        data={
+            "file": (BytesIO(b"audio"), "test.wav"),
+            "format": "flac",
+            "paranoid": "false",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 202
+    job_response = _wait_for_job(client, response.get_json()["job_id"])
+    assert job_response.get_json()["status"] == "complete"
+    assert seen["output_format"] == "flac"
 
 
 def test_server_upload_falls_back_when_gpu_fails(monkeypatch):

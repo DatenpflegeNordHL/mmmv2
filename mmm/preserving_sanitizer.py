@@ -18,6 +18,10 @@ from numpy.fft import fft, ifft, fftfreq
 from scipy.signal import butter, filtfilt
 import random
 
+from mmm.forensic_report import signal_delta_metrics, write_forensic_report
+from mmm.processing_profile import build_processing_profile
+from mmm.sanitization.metadata_cleaner import MetadataCleaner
+
 logger = logging.getLogger(__name__)
 
 def _configure_thread_counts() -> None:
@@ -183,6 +187,7 @@ def preserving_sanitize(
     # CRITICAL: Make a copy and preserve the original amplitude
     sanitized_audio = audio.copy()
     original_rms = np.sqrt(np.mean(sanitized_audio**2))
+    methods_used = ["metadata_clean_export"]
 
     # Preserve per-channel RMS ratio to prevent stereo balance drift
     channel_rms = np.array(
@@ -195,6 +200,7 @@ def preserving_sanitize(
     # 1. VERY GENTLE spectral modification
     print("   🎯 Applying GENTLE spectral modification...")
     sanitized_audio = _gentle_spectral_phase_noise(sanitized_audio, sr, paranoid_mode)
+    methods_used.append("gentle_spectral_phase_noise")
 
     # 1b. Remove spectral watermarks (known frequency bands, periodic patterns)
     if spectral_clean:
@@ -202,6 +208,7 @@ def preserving_sanitize(
         sanitized_audio = _apply_spectral_watermark_cleaning(
             sanitized_audio, sr, paranoid_mode
         )
+        methods_used.append("spectral_watermark_cleaning")
 
     # 1c. Remove statistical fingerprints (entropy, kurtosis, timing patterns)
     if fingerprint_remove:
@@ -209,6 +216,7 @@ def preserving_sanitize(
         sanitized_audio = _apply_fingerprint_removal(
             sanitized_audio, sr, paranoid_mode
         )
+        methods_used.append("fingerprint_removal")
 
     # Restore RMS after watermark/fingerprint removal
     mid_rms = np.sqrt(np.mean(sanitized_audio**2))
@@ -218,40 +226,51 @@ def preserving_sanitize(
     # 2. Add very subtle noise only to high-frequency bands + low floor dither
     print("   🎯 Adding SUBTLE high-frequency noise and human dither...")
     sanitized_audio = _add_hf_noise_and_dither(sanitized_audio, sr, paranoid_mode)
+    methods_used.append("hf_noise_and_dither")
 
     # 3. Add human-like micro-variations to break AI-regular timing
     print("   🎯 Adding micro timing/pitch humanization...")
     sanitized_audio = _apply_humanization(sanitized_audio, sr, paranoid_mode)
+    methods_used.append("humanization")
 
     # 4. Micro resample warp to disturb spectral/temporal regularity
     print("   🎯 Applying micro resample warp...")
     sanitized_audio = _apply_micro_resample_warp(sanitized_audio, sr, paranoid_mode)
+    methods_used.append("micro_resample_warp")
 
     # 5. Subtle analog coloration + micro ambience + gentle bandlimit to trim watermark bands
     print("   🎯 Adding analog warmth, micro ambience, and gentle bandlimit...")
     sanitized_audio = _apply_analog_warmth(sanitized_audio, sr, paranoid_mode)
     sanitized_audio = _add_micro_ambience(sanitized_audio, sr, paranoid_mode)
     sanitized_audio = _apply_gentle_bandlimit(sanitized_audio, sr, paranoid_mode)
+    methods_used.extend(["analog_warmth", "micro_ambience", "gentle_bandlimit"])
 
     # 6. Apply subtle resample nudge + phase swirl + phase noise + micro EQ motion (transparent)
     print("   🎯 Applying stealth resample nudge and phase swirl...")
     if resample_nudge:
         sanitized_audio = _apply_resample_nudge(sanitized_audio, sr, paranoid_mode)
+        methods_used.append("resample_nudge")
     if gated_resample_nudge:
         sanitized_audio = _apply_rms_gated_resample_nudge(
             sanitized_audio, sr, paranoid_mode
         )
+        methods_used.append("rms_gated_resample_nudge")
     if phase_swirl:
         sanitized_audio = _apply_phase_swirl(sanitized_audio, sr, paranoid_mode)
+        methods_used.append("phase_swirl")
     if phase_noise:
         sanitized_audio = _apply_phase_noise_fft(sanitized_audio, paranoid_mode)
+        methods_used.append("phase_noise_fft")
     if masked_hf_phase:
         sanitized_audio = _apply_masked_hf_phase_noise(
             sanitized_audio, sr, paranoid_mode
         )
+        methods_used.append("masked_hf_phase_noise")
     if hf_decorrelate:
         sanitized_audio = _apply_hf_decorrelate(sanitized_audio, sr, paranoid_mode)
+        methods_used.append("hf_decorrelate")
     sanitized_audio = _apply_micro_eq_modulation(sanitized_audio, sr, paranoid_mode)
+    methods_used.append("micro_eq_modulation")
 
     # 7. Optional stealth extras
     if (
@@ -267,26 +286,32 @@ def preserving_sanitize(
             sanitized_audio = _apply_subblock_phase_dither(
                 sanitized_audio, sr, paranoid_mode
             )
+            methods_used.append("subblock_phase_dither")
         if comb_mask:
             sanitized_audio = _apply_dynamic_comb_mask(
                 sanitized_audio, sr, paranoid_mode
             )
+            methods_used.append("dynamic_comb_mask")
         if transient_shift:
             sanitized_audio = _apply_transient_micro_shift(
                 sanitized_audio, sr, paranoid_mode
             )
+            methods_used.append("transient_micro_shift")
         if micro_eq_flutter:
             sanitized_audio = _apply_gated_micro_eq_flutter(
                 sanitized_audio, sr, paranoid_mode
             )
+            methods_used.append("gated_micro_eq_flutter")
         if refined_transient:
             sanitized_audio = _apply_refined_transient_shift(
                 sanitized_audio, sr, paranoid_mode
             )
+            methods_used.append("refined_transient_shift")
         if adaptive_transient:
             sanitized_audio = _apply_adaptive_transient_shift(
                 sanitized_audio, sr, paranoid_mode
             )
+            methods_used.append("adaptive_transient_shift")
 
     # 7b. Onset velocity variation (break AI-consistent attack energy)
     if onset_velocity:
@@ -294,6 +319,7 @@ def preserving_sanitize(
         sanitized_audio = _apply_onset_velocity_variation(
             sanitized_audio, sr, paranoid_mode
         )
+        methods_used.append("onset_velocity_variation")
 
     # 7c. Long-range tempo drift (break AI-perfect BPM)
     if tempo_drift:
@@ -301,6 +327,7 @@ def preserving_sanitize(
         sanitized_audio = _apply_long_range_tempo_drift(
             sanitized_audio, sr, paranoid_mode
         )
+        methods_used.append("long_range_tempo_drift")
 
     # 7d. MFCC-targeted perturbation (defeat MFCC-based classifiers)
     if mfcc_perturb:
@@ -309,10 +336,12 @@ def preserving_sanitize(
         sanitized_audio = _repair_non_finite_audio(
             sanitized_audio, label="MFCC perturbation"
         )
+        methods_used.append("mfcc_perturbation")
 
     # 8. Restore a touch of clarity lost to masking
     print("   🎯 Restoring clarity tilt...")
     sanitized_audio = _apply_clarity_tilt(sanitized_audio, sr, paranoid_mode)
+    methods_used.append("clarity_tilt")
 
     # Restore per-channel stereo balance (prevents L/R drift from independent processing)
     for ch in range(sanitized_audio.shape[1]):
@@ -407,7 +436,27 @@ def preserving_sanitize(
         print(f"   ❌ Failed to save: {e}")
         return {"success": False, "error": "Failed to save sanitized audio."}
 
+    try:
+        metadata_clean = not MetadataCleaner()._verify_metadata_present(output_file)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Failed to verify sanitized metadata: {exc}",
+        }
+    if not metadata_clean:
+        return {
+            "success": False,
+            "error": "Metadata verification failed after preserving export.",
+        }
+
     total_time = time.time() - start_time
+    profile = build_processing_profile(
+        engine="cpu_preserving",
+        paranoid_mode=paranoid_mode,
+        methods_used=methods_used,
+        passes_run=1,
+    )
+    signal_delta = signal_delta_metrics(audio, sanitized_audio)
 
     # Report honest stats.  We know metadata was deleted (Phase 1).
     # The audio-domain processing applies spectral perturbation; we
@@ -419,7 +468,21 @@ def preserving_sanitize(
         "watermarks_detected": 0,
         "processing_time": total_time,
         "processing_speed": f"{duration / total_time:.1f}x real-time",
+        "processing_engine": profile.engine,
+        "methods_used": profile.methods_used,
+        "passes_run": profile.passes_run,
+        "processing_profile": profile.to_dict(),
+        "metadata_clean": metadata_clean,
+        **signal_delta,
     }
+    report_path = write_forensic_report(
+        input_file=input_file,
+        output_file=output_file,
+        stats=stats,
+        metadata_clean=metadata_clean,
+        signal_delta=signal_delta,
+    )
+    stats["forensic_report"] = str(report_path)
 
     print(f"\n🎉 PRESERVING SANITIZATION COMPLETE!")
     print(f"   Total time: {total_time:.2f}s")
@@ -486,6 +549,7 @@ def _add_hf_noise_and_dither(
     """
     Add shaped noise above 12-15kHz and a low noise floor dither to mask AI-regular spectra.
     """
+    audio = audio.copy()
     noise_level = 1.8e-7 if paranoid_mode else 9e-8  # lower to reduce hiss
     dither_level = 4e-6 if paranoid_mode else 2e-6
     nyquist = sr / 2
@@ -656,6 +720,7 @@ def _apply_analog_warmth(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.
     """
     Add light saturation and remove DC/ultrasonic content to mimic analog chain.
     """
+    input_peak = float(np.max(np.abs(audio))) if audio.size else 0.0
     nyquist = sr / 2
     drive = 1.07 if paranoid_mode else 1.04  # back off to reduce perceived mud
 
@@ -668,6 +733,10 @@ def _apply_analog_warmth(audio: np.ndarray, sr: int, paranoid_mode: bool) -> np.
 
     # Soft saturation
     audio = np.tanh(audio * drive) / np.tanh(drive)
+    output_peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    target_peak = input_peak * 0.999
+    if input_peak > 0 and output_peak >= target_peak:
+        audio = audio * (target_peak / output_peak)
 
     return audio
 

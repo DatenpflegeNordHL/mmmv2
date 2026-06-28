@@ -262,6 +262,35 @@ class GPUAcceleratedWatermarkDetector:
             self.device = None
             print("💻 GPU not available, using CPU mode")
 
+    def _heuristic_result(
+        self,
+        detected: bool,
+        confidence: float,
+        details: List[str],
+        sample_rate: int,
+        high_freq_ratio: float = 0.0,
+    ) -> Dict[str, Any]:
+        return {
+            "detected": detected,
+            "confidence": confidence,
+            "details": details,
+            "heuristic_indicator": True,
+            "detector_type": "heuristic_threshold",
+            "calibration": {
+                "sample_rate": sample_rate,
+                "thresholds": {
+                    "high_frequency_cutoff_hz": HIGH_FREQUENCY_CUTOFF_HZ,
+                    "high_frequency_ratio_threshold": HIGH_FREQUENCY_RATIO_THRESHOLD,
+                    "min_audio_rms": MIN_AUDIO_RMS,
+                },
+            },
+            "evidence_metrics": {
+                "high_frequency_ratio": high_freq_ratio,
+                "high_frequency_ratio_threshold": HIGH_FREQUENCY_RATIO_THRESHOLD,
+                "high_frequency_cutoff_hz": HIGH_FREQUENCY_CUTOFF_HZ,
+            },
+        }
+
     def detect_spectral_patterns_gpu(
         self, audio_data: np.ndarray, sample_rate: int
     ) -> Dict[str, Any]:
@@ -269,11 +298,7 @@ class GPUAcceleratedWatermarkDetector:
         GPU-accelerated spectral pattern detection
         """
         if sample_rate <= 0:
-            return {
-                "detected": False,
-                "confidence": 0.0,
-                "details": ["Invalid sample rate"],
-            }
+            return self._heuristic_result(False, 0.0, ["Invalid sample rate"], sample_rate)
 
         if not self.gpu_available:
             return self._detect_spectral_patterns_cpu(audio_data, sample_rate)
@@ -283,21 +308,17 @@ class GPUAcceleratedWatermarkDetector:
         # Convert to PyTorch tensor on GPU
         audio_data = self._to_mono(audio_data)
         if audio_data.size < 2:
-            return {
-                "detected": False,
-                "confidence": 0.0,
-                "details": ["Audio chunk too short for spectral analysis"],
-            }
+            return self._heuristic_result(
+                False, 0.0, ["Audio chunk too short for spectral analysis"], sample_rate
+            )
 
         audio_tensor = torch.from_numpy(audio_data).float().to(self.device)
         audio_tensor = audio_tensor - torch.mean(audio_tensor)
         rms = torch.sqrt(torch.mean(audio_tensor * audio_tensor))
         if float(rms.item()) < MIN_AUDIO_RMS:
-            return {
-                "detected": False,
-                "confidence": 0.0,
-                "details": ["Audio chunk is silent or near-silent"],
-            }
+            return self._heuristic_result(
+                False, 0.0, ["Audio chunk is silent or near-silent"], sample_rate
+            )
 
         # GPU FFT computation. A Hann window limits leakage from normal tones.
         window = torch.hann_window(audio_tensor.shape[0], device=self.device)
@@ -313,11 +334,12 @@ class GPUAcceleratedWatermarkDetector:
         if not bool(torch.any(high_freq_mask).item()) or not bool(
             torch.any(analysis_mask).item()
         ):
-            return {
-                "detected": False,
-                "confidence": 0.0,
-                "details": ["No high-frequency band available at this sample rate"],
-            }
+            return self._heuristic_result(
+                False,
+                0.0,
+                ["No high-frequency band available at this sample rate"],
+                sample_rate,
+            )
 
         total_power = torch.sum(power[analysis_mask])
         if float(total_power.item()) <= 0:
@@ -329,14 +351,16 @@ class GPUAcceleratedWatermarkDetector:
 
         detected = high_freq_ratio >= HIGH_FREQUENCY_RATIO_THRESHOLD
         confidence = self._confidence_from_ratio(high_freq_ratio)
-        return {
-            "detected": detected,
-            "confidence": confidence,
-            "details": [
+        return self._heuristic_result(
+            detected,
+            confidence,
+            [
                 "GPU-accelerated spectral analysis",
                 f"High-frequency energy ratio: {high_freq_ratio:.4f}",
             ],
-        }
+            sample_rate,
+            high_freq_ratio,
+        )
 
     @staticmethod
     def _to_mono(audio_data: np.ndarray) -> np.ndarray:
@@ -359,20 +383,16 @@ class GPUAcceleratedWatermarkDetector:
     ) -> Dict[str, Any]:
         audio_data = self._to_mono(audio_data)
         if audio_data.size < 2:
-            return {
-                "detected": False,
-                "confidence": 0.0,
-                "details": ["Audio chunk too short for spectral analysis"],
-            }
+            return self._heuristic_result(
+                False, 0.0, ["Audio chunk too short for spectral analysis"], sample_rate
+            )
 
         centered = audio_data - float(np.mean(audio_data))
         rms = float(np.sqrt(np.mean(centered * centered)))
         if rms < MIN_AUDIO_RMS:
-            return {
-                "detected": False,
-                "confidence": 0.0,
-                "details": ["Audio chunk is silent or near-silent"],
-            }
+            return self._heuristic_result(
+                False, 0.0, ["Audio chunk is silent or near-silent"], sample_rate
+            )
 
         windowed = centered * np.hanning(centered.size)
         power = np.abs(np.fft.rfft(windowed)) ** 2
@@ -381,11 +401,12 @@ class GPUAcceleratedWatermarkDetector:
         high_freq_mask = freqs >= HIGH_FREQUENCY_CUTOFF_HZ
         analysis_mask = freqs > 20
         if not high_freq_mask.any() or not analysis_mask.any():
-            return {
-                "detected": False,
-                "confidence": 0.0,
-                "details": ["No high-frequency band available at this sample rate"],
-            }
+            return self._heuristic_result(
+                False,
+                0.0,
+                ["No high-frequency band available at this sample rate"],
+                sample_rate,
+            )
 
         total_power = float(np.sum(power[analysis_mask]))
         high_freq_ratio = (
@@ -394,14 +415,16 @@ class GPUAcceleratedWatermarkDetector:
             else 0.0
         )
         detected = high_freq_ratio >= HIGH_FREQUENCY_RATIO_THRESHOLD
-        return {
-            "detected": detected,
-            "confidence": self._confidence_from_ratio(high_freq_ratio),
-            "details": [
+        return self._heuristic_result(
+            detected,
+            self._confidence_from_ratio(high_freq_ratio),
+            [
                 "CPU spectral analysis",
                 f"High-frequency energy ratio: {high_freq_ratio:.4f}",
             ],
-        }
+            sample_rate,
+            high_freq_ratio,
+        )
 
     def batch_process_files(
         self, file_paths: List[Path], chunk_duration: float = 30.0

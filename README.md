@@ -178,7 +178,7 @@ Options:
   --max-size INTEGER  Max upload in MB  [default: 95]
 ```
 
-Open `http://127.0.0.1:8778` in your browser to drag-and-drop audio files for sanitization. Supports MP3, WAV, and FLAC. Processing runs as a background job and uses the CUDA web sanitizer first when a compatible NVIDIA GPU is available, with a safe CPU preserving fallback.
+Open `http://127.0.0.1:8778` in your browser to drag-and-drop audio files for sanitization. Supports MP3, WAV, and FLAC input and output. Processing runs as a background job and uses the CUDA web sanitizer first when a compatible NVIDIA GPU is available, with a safe CPU preserving fallback. For public hosting, run the Flask app behind gunicorn/uwsgi and a reverse proxy rather than exposing Werkzeug directly.
 
 ### `config`
 Configuration management

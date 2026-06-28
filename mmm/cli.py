@@ -81,6 +81,15 @@ def _process_massacre_file(
     return result
 
 
+def _cuda_available_for_worker_limit() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
 @click.group()
 @click.version_option(version="2.0.0", prog_name="mmm")
 @click.pass_context
@@ -131,7 +140,7 @@ def cli(ctx):
     "--format",
     "-f",
     "output_format",
-    type=click.Choice(["preserve", "mp3", "wav"], case_sensitive=False),
+    type=click.Choice(["preserve", "mp3", "wav", "flac"], case_sensitive=False),
     default="preserve",
     help="Output audio format",
 )
@@ -375,24 +384,27 @@ def obliterate(
                 )
 
                 # Convert preserving results to expected format
+                preserving_stats = dict(preserving_result.get("stats", {}))
+                preserving_stats.update(
+                    {
+                        "metadata_removed": preserving_stats.get("metadata_removed", 1),
+                        "watermarks_detected": preserving_stats.get(
+                            "watermarks_detected",
+                            preserving_stats.get("watermarks_removed", 0),
+                        ),
+                        "watermarks_removed": preserving_stats.get(
+                            "watermarks_removed", 0
+                        ),
+                        "quality_loss": preserving_stats.get("quality_loss", 0.0),
+                        "processing_time": preserving_stats.get(
+                            "processing_time", 0.0
+                        ),
+                    }
+                )
                 result = {
                     "success": preserving_result["success"],
                     "output_file": preserving_result["output_file"],
-                    "stats": {
-                        "metadata_removed": preserving_result["stats"][
-                            "metadata_removed"
-                        ],
-                        "watermarks_detected": preserving_result["stats"][
-                            "watermarks_removed"
-                        ],
-                        "watermarks_removed": preserving_result["stats"][
-                            "watermarks_removed"
-                        ],
-                        "quality_loss": 0.0,  # Assume minimal loss with preserving mode
-                        "processing_time": preserving_result["stats"][
-                            "processing_time"
-                        ],
-                    },
+                    "stats": preserving_stats,
                 }
                 console.success(
                     f"🎵 PRESERVING sanitization completed in {preserving_result['stats']['processing_time']}"
@@ -427,6 +439,7 @@ def obliterate(
                     cleaned_file = Path(result["output_file"])
                     post_analysis_results = turbo_analysis(cleaned_file)
                     remaining_threats = post_analysis_results.get("total_threats", 0)
+                    from .forensic_report import sha256_file
 
                     # Calculate effectiveness
                     removal_effectiveness = 0
@@ -440,7 +453,11 @@ def obliterate(
                         "original_threats": original_threats,
                         "remaining_threats": remaining_threats,
                         "removal_effectiveness": round(removal_effectiveness, 2),
-                        "hash_different": True,  # Assume true since we modified the file
+                        "hash_different": sha256_file(input_file)
+                        != sha256_file(cleaned_file),
+                        "forensic_report": result.get("stats", {}).get(
+                            "forensic_report"
+                        ),
                     }
                 except Exception as e:
                     verification = {"success": False, "error": str(e)}
@@ -479,7 +496,7 @@ def obliterate(
     "--extension",
     "-e",
     multiple=True,
-    default=["mp3", "wav"],
+    default=["mp3", "wav", "flac"],
     help="File extensions to process (can be used multiple times)",
 )
 @click.option(
@@ -500,8 +517,16 @@ def obliterate(
     default=True,
     help="Enable/disable turbo mode with GPU acceleration",
 )
+@click.option(
+    "--recursive",
+    is_flag=True,
+    default=False,
+    help="Recursively scan subdirectories",
+)
 @click.pass_context
-def massacre(ctx, directory, output_dir, extension, paranoid, workers, backup, turbo):
+def massacre(
+    ctx, directory, output_dir, extension, paranoid, workers, backup, turbo, recursive
+):
     """
     ⚡ Process entire directory of audio files
 
@@ -518,9 +543,10 @@ def massacre(ctx, directory, output_dir, extension, paranoid, workers, backup, t
 
     # Scan for files
     files = []
+    globber = directory.rglob if recursive else directory.glob
     for ext in extension:
-        files.extend(directory.glob(f"*.{ext.lower()}"))
-        files.extend(directory.glob(f"*.{ext.upper()}"))
+        files.extend(globber(f"*.{ext.lower()}"))
+        files.extend(globber(f"*.{ext.upper()}"))
     files = sorted(set(files))
 
     if not files:
@@ -536,6 +562,11 @@ def massacre(ctx, directory, output_dir, extension, paranoid, workers, backup, t
         output_dir.mkdir(parents=True, exist_ok=True)
 
     workers = min(max(1, workers), len(files), 32)
+    if turbo and workers > 1 and _cuda_available_for_worker_limit():
+        console.warning(
+            "⚠️ CUDA turbo batch detected; limiting workers to 1 to avoid GPU oversubscription"
+        )
+        workers = 1
     console.info("🔄 Processing files...")
 
     failures = 0
@@ -817,7 +848,7 @@ def config_list():
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["preserve", "mp3", "wav"], case_sensitive=False),
+    type=click.Choice(["preserve", "mp3", "wav", "flac"], case_sensitive=False),
     default="preserve",
     help="Output format",
 )

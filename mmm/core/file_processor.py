@@ -31,6 +31,7 @@ class FileProcessor:
         paranoid_mode: bool = False,
         workers: int = 4,
         continue_on_error: bool = None,
+        recursive: bool = False,
     ) -> Dict[str, Any]:
         """
         Process all audio files in a directory
@@ -47,7 +48,7 @@ class FileProcessor:
             Dict containing processing results
         """
         if extensions is None:
-            extensions = ["mp3", "wav"]
+            extensions = ["mp3", "wav", "flac"]
 
         if continue_on_error is None:
             continue_on_error = self.config.get(
@@ -55,7 +56,7 @@ class FileProcessor:
             )
 
         # Find audio files
-        files = self._find_audio_files(directory, extensions)
+        files = self._find_audio_files(directory, extensions, recursive=recursive)
 
         if not files:
             self.console.warning("No audio files found in directory")
@@ -103,14 +104,20 @@ class FileProcessor:
 
         return results
 
-    def _find_audio_files(self, directory: Path, extensions: List[str]) -> List[Path]:
+    def _find_audio_files(
+        self,
+        directory: Path,
+        extensions: List[str],
+        recursive: bool = False,
+    ) -> List[Path]:
         """Find all audio files with specified extensions"""
         files = []
+        globber = directory.rglob if recursive else directory.glob
 
         for ext in extensions:
             # Find files with both lowercase and uppercase extensions
-            files.extend(directory.glob(f"*.{ext.lower()}"))
-            files.extend(directory.glob(f"*.{ext.upper()}"))
+            files.extend(globber(f"*.{ext.lower()}"))
+            files.extend(globber(f"*.{ext.upper()}"))
 
         # Remove duplicates and sort
         files = sorted(list(set(files)))

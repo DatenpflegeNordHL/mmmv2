@@ -231,8 +231,11 @@ class FingerprintRemover:
 
         # Identify transient points (onsets, attacks)
         # Use high-frequency content to find transients
+        cutoff_hz = min(5000.0, sample_rate * 0.45)
+        if cutoff_hz <= 0:
+            return result
         high_freq = signal.sosfilt(
-            signal.butter(4, 5000, "hp", fs=sample_rate, output="sos"), audio_data
+            signal.butter(4, cutoff_hz, "hp", fs=sample_rate, output="sos"), audio_data
         )
         envelope = np.abs(signal.hilbert(high_freq))
 
@@ -250,22 +253,35 @@ class FingerprintRemover:
                 )
 
                 if shift_samples != 0:
-                    # Apply local time stretching/compression
+                    # Apply local time warping using the computed target indices.
                     window_start = max(0, peak - 50)
                     window_end = min(len(audio_data), peak + 50)
                     window_size = window_end - window_start
 
-                    # Create time indices with perturbation
+                    # Create monotonic target indices with a Gaussian shift centered
+                    # on the transient. Interpolating back onto the original grid
+                    # moves the transient instead of merely resampling to same length.
                     original_indices = np.arange(window_size)
+                    center = peak - window_start
                     perturbation = shift_samples * np.exp(
-                        -0.5 * ((np.arange(window_size) - window_size // 2) / 10) ** 2
+                        -0.5 * ((np.arange(window_size) - center) / 10) ** 2
                     )
-                    perturbed_indices = original_indices + perturbation
+                    target_indices = np.clip(
+                        original_indices + perturbation,
+                        0,
+                        window_size - 1,
+                    )
 
-                    # Apply perturbation
-                    window_data = audio_data[window_start:window_end]
-                    f = signal.resample(window_data, len(perturbed_indices))
-                    result["cleaned_data"][window_start : window_start + len(f)] = f
+                    window_data = result["cleaned_data"][window_start:window_end].copy()
+                    order = np.argsort(target_indices)
+                    shifted_window = np.interp(
+                        original_indices,
+                        target_indices[order],
+                        window_data[order],
+                        left=window_data[0],
+                        right=window_data[-1],
+                    )
+                    result["cleaned_data"][window_start:window_end] = shifted_window
 
         return result
 
@@ -348,10 +364,23 @@ class FingerprintRemover:
     ) -> Dict[str, Any]:
         """Calculate quality metrics comparing original and cleaned audio"""
         metrics = {}
+        original_vector = self._quality_metric_vector(original)
+        cleaned_vector = self._quality_metric_vector(cleaned)
+        min_length = min(original_vector.size, cleaned_vector.size)
+        if min_length == 0:
+            return {
+                "snr_db": float("inf"),
+                "mfcc_distance": 0.0,
+                "spectral_similarity": 1.0,
+                "preservation_score": 1.0,
+            }
+
+        original_vector = original_vector[:min_length]
+        cleaned_vector = cleaned_vector[:min_length]
 
         # Signal-to-Noise Ratio (SNR)
-        noise = original - cleaned
-        signal_power = np.mean(original**2)
+        noise = original_vector - cleaned_vector
+        signal_power = np.mean(original_vector**2)
         noise_power = np.mean(noise**2)
 
         if noise_power > 0:
@@ -360,13 +389,12 @@ class FingerprintRemover:
             metrics["snr_db"] = float("inf")
 
         # Perceptual similarity (simplified MFCC-based)
-        if original.ndim == 1:
-            orig_mfcc = librosa.feature.mfcc(y=original, sr=sample_rate, n_mfcc=13)
-            clean_mfcc = librosa.feature.mfcc(y=cleaned, sr=sample_rate, n_mfcc=13)
-        else:
-            # Use first channel for MFCC comparison
-            orig_mfcc = librosa.feature.mfcc(y=original[:, 0], sr=sample_rate, n_mfcc=13)
-            clean_mfcc = librosa.feature.mfcc(y=cleaned[:, 0], sr=sample_rate, n_mfcc=13)
+        orig_mfcc = librosa.feature.mfcc(
+            y=original_vector, sr=sample_rate, n_mfcc=13
+        )
+        clean_mfcc = librosa.feature.mfcc(
+            y=cleaned_vector, sr=sample_rate, n_mfcc=13
+        )
 
         # Calculate distance between MFCCs (handle length mismatch)
         min_frames = min(orig_mfcc.shape[1], clean_mfcc.shape[1])
@@ -374,9 +402,11 @@ class FingerprintRemover:
         metrics["mfcc_distance"] = float(mfcc_distance)
 
         # Spectral similarity
-        orig_fft = np.abs(np.fft.fft(original.flatten()))
-        clean_fft = np.abs(np.fft.fft(cleaned.flatten()))
+        orig_fft = np.abs(np.fft.fft(original_vector))
+        clean_fft = np.abs(np.fft.fft(cleaned_vector))
         spectral_similarity = np.corrcoef(orig_fft, clean_fft)[0, 1]
+        if not np.isfinite(spectral_similarity):
+            spectral_similarity = 1.0 if np.allclose(orig_fft, clean_fft) else 0.0
         metrics["spectral_similarity"] = float(spectral_similarity)
 
         # Quality preservation score (0-1, higher is better)
@@ -395,6 +425,15 @@ class FingerprintRemover:
         metrics["quality_preservation"] = float(preservation_score)
 
         return metrics
+
+    def _quality_metric_vector(self, audio_data: np.ndarray) -> np.ndarray:
+        """Return a 1-D vector for quality metrics without accidental broadcasting."""
+        audio_array = np.asarray(audio_data)
+        if audio_array.ndim == 0:
+            return audio_array.reshape(1).astype(float)
+        if audio_array.ndim == 1:
+            return audio_array.astype(float)
+        return audio_array[:, 0].astype(float)
 
     def remove_machine_perfection_patterns(self, audio_data: np.ndarray, sample_rate: int = 44100) -> np.ndarray:
         """Remove patterns typical of machine-perfect audio generation"""

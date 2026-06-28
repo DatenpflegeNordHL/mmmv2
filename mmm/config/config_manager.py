@@ -190,7 +190,7 @@ class ConfigManager:
             validation["valid"] = False
 
         # Validate output_format
-        output_formats = ["preserve", "mp3", "wav"]
+        output_formats = ["preserve", "mp3", "wav", "flac"]
         output_format = config.get("output_format", "preserve")
         if output_format not in output_formats:
             validation["errors"].append(

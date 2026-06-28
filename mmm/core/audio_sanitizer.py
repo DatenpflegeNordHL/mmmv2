@@ -15,6 +15,8 @@ import soundfile as sf
 from mutagen import File as MutagenFile
 from pydub import AudioSegment
 
+from ..forensic_report import signal_delta_metrics, write_forensic_report
+from ..processing_profile import build_processing_profile
 from ..detection.watermark_detector import WatermarkDetector
 from ..detection.metadata_scanner import MetadataScanner
 from ..detection.statistical_analyzer import StatisticalAnalyzer
@@ -63,6 +65,8 @@ class AudioSanitizer:
             "watermarks_removed": 0,
             "quality_loss": 0.0,
             "processing_time": 0,
+            "methods_used": [],
+            "passes_run": 1,
         }
 
     def _generate_output_path(self, output_format: Optional[str] = None) -> Path:
@@ -276,15 +280,22 @@ class AudioSanitizer:
             # Phase 2: Spectral watermark removal
             self._info("Phase 2: Spectral watermark elimination...")
             spectral_result = self.spectral_cleaner.clean_watermarks(
-                sanitized_audio, self.sample_rate
+                sanitized_audio,
+                self.sample_rate,
+                detector_findings=analysis.get("watermarks", {}),
             )
             sanitized_audio = spectral_result["cleaned_audio"]
+            methods_used = ["metadata_clean_export"]
+            methods_used.extend(spectral_result.get("methods_used", []))
             self.processing_stats["patterns_found"] = spectral_result[
                 "watermarks_found"
             ]
             self.processing_stats["patterns_suppressed"] = spectral_result[
                 "watermarks_removed"
             ]
+            self.processing_stats["spectral_modified_regions"] = spectral_result.get(
+                "modified_regions", []
+            )
 
             # Phase 3: Statistical fingerprint removal
             self._info("Phase 3: Statistical fingerprint destruction...")
@@ -292,13 +303,17 @@ class AudioSanitizer:
                 sanitized_audio, self.sample_rate
             )
             sanitized_audio = fingerprint_result["cleaned_audio"]
+            methods_used.extend(fingerprint_result.get("removal_methods", []))
 
             # Phase 4: Final cleanup and quality preservation
             self._info("Phase 4: Final sanitization...")
+            passes_run = 1
             if self.paranoid_mode:
                 # Multiple passes in paranoid mode
                 for i in range(3):
                     sanitized_audio = self._paranoid_pass(sanitized_audio)
+                methods_used.append("paranoid_phase_noise_pass")
+                passes_run += 3
 
             # Save processed audio to a same-format temp file, then run the
             # metadata cleaner into the final destination and verify it.
@@ -322,6 +337,7 @@ class AudioSanitizer:
                     metadata_result.get("tags_removed", 0)
                     + metadata_result.get("chunks_removed", 0),
                 )
+                methods_used.extend(metadata_result.get("methods_used", []))
             finally:
                 temp_output.unlink(missing_ok=True)
 
@@ -331,6 +347,27 @@ class AudioSanitizer:
 
             # Verify output
             final_hash = self._calculate_file_hash(self.output_file)
+            profile = build_processing_profile(
+                engine="regular_core",
+                paranoid_mode=self.paranoid_mode,
+                methods_used=methods_used,
+                passes_run=passes_run,
+            )
+            signal_delta = signal_delta_metrics(self.audio_data, sanitized_audio)
+            self.processing_stats["processing_engine"] = profile.engine
+            self.processing_stats["methods_used"] = profile.methods_used
+            self.processing_stats["passes_run"] = profile.passes_run
+            self.processing_stats["processing_profile"] = profile.to_dict()
+            self.processing_stats.update(signal_delta)
+            report_path = write_forensic_report(
+                input_file=self.input_file,
+                output_file=self.output_file,
+                stats=self.processing_stats,
+                analysis=analysis,
+                metadata_clean=True,
+                signal_delta=signal_delta,
+            )
+            self.processing_stats["forensic_report"] = str(report_path)
 
             return {
                 "success": True,

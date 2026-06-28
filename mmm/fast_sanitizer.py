@@ -29,6 +29,11 @@ def fast_sanitize(input_file, output_file=None, paranoid_mode=False, threat_coun
         Dict containing sanitization results
     """
     _configure_thread_counts()
+    input_file = Path(input_file)
+    output_file = Path(output_file) if output_file else None
+    if not input_file.exists():
+        return {"success": False, "error": f"Input file not found: {input_file}"}
+
     # Choose output format and path (keep extensions honest)
     normalized_format = input_file.suffix.lstrip(".").lower()
     if output_file:

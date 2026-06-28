@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from mutagen import File as MutagenFile
+from mutagen.flac import FLAC
 from mutagen.id3 import ID3, ID3NoHeaderError, TXXX, APIC, GEOB, PRIV
 from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
@@ -101,13 +102,24 @@ class MetadataCleaner:
                 result = self._clean_mp3(input_file, output_file)
             elif file_extension == ".wav":
                 result = self._clean_wav(input_file, output_file)
+            elif file_extension == ".flac":
+                result = self._clean_flac(input_file, output_file)
             else:
                 # Generic cleaning for other formats
                 result = self._clean_generic(input_file, output_file)
 
+            if result.get("success") and self._verify_metadata_present(output_file):
+                result["success"] = False
+                result["errors"].append(
+                    "Final metadata verification failed after cleaning"
+                )
+            if not result.get("success"):
+                output_file.unlink(missing_ok=True)
+
         except Exception as e:
             result["errors"].append(f"Cleaning failed: {str(e)}")
             result["success"] = False
+            output_file.unlink(missing_ok=True)
 
         return result
 
@@ -212,6 +224,58 @@ class MetadataCleaner:
 
         except Exception as e:
             result["errors"].append(f"MP3 cleaning failed: {str(e)}")
+
+        return result
+
+    def _clean_flac(self, input_file: Path, output_file: Path) -> Dict[str, Any]:
+        """Clean metadata from FLAC files, including Vorbis comments and pictures."""
+        result = {
+            "success": False,
+            "tags_removed": 0,
+            "chunks_removed": 0,
+            "methods_used": [],
+            "errors": [],
+        }
+
+        try:
+            # Mutagen is the least destructive path for native FLAC metadata.
+            try:
+                shutil.copy2(input_file, output_file)
+                flac_file = FLAC(output_file)
+                tags_count = len(flac_file.tags or {})
+                pictures_count = len(flac_file.pictures or [])
+
+                if flac_file.tags:
+                    flac_file.clear()
+                if flac_file.pictures:
+                    flac_file.clear_pictures()
+                if tags_count or pictures_count:
+                    flac_file.save()
+
+                result["tags_removed"] += tags_count
+                result["chunks_removed"] += pictures_count
+                result["methods_used"].append("flac_mutagen_clear")
+                result["success"] = True
+
+            except Exception as e:
+                result["errors"].append(f"FLAC mutagen cleaning: {str(e)}")
+
+            # If native tag editing failed or left tags behind, re-encode with ffmpeg.
+            if not result["success"] or self._verify_metadata_present(output_file):
+                try:
+                    audio = AudioSegment.from_file(str(input_file), format="flac")
+                    audio.export(
+                        str(output_file),
+                        format="flac",
+                        parameters=["-map_metadata", "-1"],
+                    )
+                    result["methods_used"].append("flac_reencode_clean")
+                    result["success"] = True
+                except Exception as e:
+                    result["errors"].append(f"FLAC re-encoding: {str(e)}")
+
+        except Exception as e:
+            result["errors"].append(f"FLAC cleaning failed: {str(e)}")
 
         return result
 
@@ -368,7 +432,11 @@ class MetadataCleaner:
             file_format = input_file.suffix.lower().lstrip(".")
 
             # Export clean
-            audio.export(str(output_file), format=file_format)
+            audio.export(
+                str(output_file),
+                format=file_format,
+                parameters=["-map_metadata", "-1"],
+            )
 
             result["methods_used"].append("generic_reencode")
             result["success"] = True
@@ -384,6 +452,12 @@ class MetadataCleaner:
     def _verify_metadata_present(self, file_path: Path) -> bool:
         """Check if file still contains metadata"""
         try:
+            suffix = file_path.suffix.lower()
+            if suffix == ".wav":
+                return self._verify_wav_metadata_present(file_path)
+            if suffix == ".flac":
+                return self._verify_flac_metadata_present(file_path)
+
             audio_file = MutagenFile(file_path)
             if audio_file and hasattr(audio_file, "tags") and audio_file.tags:
                 return len(audio_file.tags) > 0
@@ -404,6 +478,43 @@ class MetadataCleaner:
             # Fail closed: if metadata verification cannot read the file,
             # assume metadata may still be present.
             return True
+
+    def _verify_flac_metadata_present(self, file_path: Path) -> bool:
+        """Return True when FLAC Vorbis comments or picture blocks remain."""
+        flac_file = FLAC(file_path)
+        return bool(flac_file.tags) or bool(flac_file.pictures)
+
+    def _verify_wav_metadata_present(self, file_path: Path) -> bool:
+        """Return True when WAV contains non-essential metadata/custom chunks."""
+        with open(file_path, "rb") as handle:
+            data = handle.read()
+
+        if len(data) < 12 or not data.startswith(b"RIFF") or data[8:12] != b"WAVE":
+            return True
+
+        essential_chunks = {b"fmt ", b"data", b"fact"}
+        pos = 12
+        found_data = False
+        found_fmt = False
+        while pos + 8 <= len(data):
+            chunk_id = data[pos : pos + 4]
+            chunk_size = int.from_bytes(data[pos + 4 : pos + 8], "little")
+            chunk_end = pos + 8 + chunk_size + (chunk_size % 2)
+            if chunk_end > len(data):
+                return True
+
+            if chunk_id == b"fmt ":
+                found_fmt = True
+            elif chunk_id == b"data":
+                found_data = True
+            elif chunk_id not in essential_chunks:
+                return True
+
+            if chunk_size == 0 and chunk_id != b"data":
+                return True
+            pos = chunk_end
+
+        return not (found_fmt and found_data)
 
     def strip_all_binary_metadata(self, file_data: bytes) -> bytes:
         """

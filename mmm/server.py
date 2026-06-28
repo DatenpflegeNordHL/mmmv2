@@ -377,6 +377,7 @@ HTML_TEMPLATE = """\
         <option value="preserve" selected>Preserve original</option>
         <option value="mp3">MP3</option>
         <option value="wav">WAV</option>
+        <option value="flac">FLAC</option>
       </select>
     </div>
     <div class="option-group">
@@ -636,7 +637,7 @@ def _handle_upload(app: Flask, processing_lock: threading.Lock) -> tuple:
 
     # Parse options
     output_format = request.form.get("format", "preserve")
-    if output_format not in ("preserve", "mp3", "wav"):
+    if output_format not in ("preserve", "mp3", "wav", "flac"):
         output_format = "preserve"
 
     paranoid = request.form.get("paranoid", "false").lower() == "true"
@@ -821,6 +822,10 @@ def run_server(
     if host != "127.0.0.1":
         console.warning(
             f"Binding to {host} — the server will be accessible from the network!"
+        )
+        console.warning(
+            "For production hosting, run the Flask app behind gunicorn/uwsgi and a "
+            "reverse proxy instead of exposing Werkzeug directly."
         )
 
     max_mb = max_file_size // (1024 * 1024)

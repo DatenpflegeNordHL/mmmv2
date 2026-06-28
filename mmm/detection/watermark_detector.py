@@ -16,6 +16,7 @@ class WatermarkDetector:
 
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
+        self.content_type = self.config.get("content_type", "music")
         self.detection_methods = [
             "spread_spectrum",
             "echo_based",
@@ -78,6 +79,7 @@ class WatermarkDetector:
                 else:
                     continue
 
+                result = self._label_heuristic_result(method, result, sample_rate)
                 results["method_results"][method] = result
 
                 if result["detected"]:
@@ -86,6 +88,9 @@ class WatermarkDetector:
                             "method": method,
                             "confidence": result["confidence"],
                             "details": result["details"],
+                            "detector_type": result["detector_type"],
+                            "heuristic_indicator": result["heuristic_indicator"],
+                            "evidence_metrics": result["evidence_metrics"],
                         }
                     )
                     results["confidence_scores"][method] = result["confidence"]
@@ -107,6 +112,65 @@ class WatermarkDetector:
 
         return results
 
+    def _label_heuristic_result(
+        self, method: str, result: Dict[str, Any], sample_rate: int
+    ) -> Dict[str, Any]:
+        """Attach audit metadata so callers do not treat heuristics as proofs."""
+        result = dict(result)
+        result.setdefault("heuristic_indicator", True)
+        result.setdefault("detector_type", "heuristic_threshold")
+        result.setdefault(
+            "calibration",
+            {
+                "sample_rate": sample_rate,
+                "content_type": self.content_type,
+                "thresholds": self._calibrated_thresholds(method, sample_rate),
+            },
+        )
+        result.setdefault(
+            "evidence_metrics",
+            {
+                "details_count": len(result.get("details", [])),
+                "confidence": float(result.get("confidence", 0.0)),
+            },
+        )
+        return result
+
+    def _calibrated_thresholds(self, method: str, sample_rate: int) -> Dict[str, Any]:
+        """Return transparent heuristic thresholds adjusted for sample rate."""
+        nyquist = max(sample_rate / 2, 1.0)
+        high_frequency_start = min(15000, nyquist * 0.75)
+        presets = {
+            "spread_spectrum": {
+                "high_frequency_start_hz": high_frequency_start,
+                "consistency_score": 0.70,
+                "autocorrelation_peak_count": 10,
+                "known_frequency_sigma": 3.0,
+            },
+            "echo_based": {
+                "min_delay_ms": 1,
+                "max_delay_ms": 50,
+                "min_echo_strength": 0.10,
+                "delay_consistency": 0.80,
+            },
+            "statistical": {
+                "entropy_lt": 6.0,
+                "spectral_entropy_lt": 8.0,
+                "kurtosis_distance_gt": 2.0,
+            },
+            "phase_modulation": {"phase_consistency": 0.70},
+            "amplitude_modulation": {
+                "min_modulation_hz": 1,
+                "max_modulation_hz": 100,
+                "peak_count_gt": 5,
+            },
+            "frequency_domain": {
+                "spectral_flatness_gt": 0.30,
+                "peak_consistency_gt": 0.80,
+            },
+        }
+        return presets.get(method, {})
+
     def detect_spread_spectrum(
         self, audio_data: np.ndarray, sample_rate: int
     ) -> Dict[str, Any]:
@@ -120,7 +184,12 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {"detected": False, "confidence": 0.0, "details": []}
+        result = {
+            "detected": False,
+            "confidence": 0.0,
+            "details": [],
+            "evidence_metrics": {"channels": []},
+        }
 
         # Process each channel
         for channel_idx in range(audio_data.shape[1]):
@@ -159,6 +228,15 @@ class WatermarkDetector:
             auto_corr_peaks = signal.find_peaks(
                 correlation, height=np.max(correlation) * 0.8
             )[0]
+            result["evidence_metrics"]["channels"].append(
+                {
+                    "channel": channel_idx,
+                    "high_frequency_mean_power": float(mean_power),
+                    "high_frequency_std_power": float(std_power),
+                    "consistency_score": float(consistency_score),
+                    "autocorrelation_peaks": int(len(auto_corr_peaks)),
+                }
+            )
 
             # Detection criteria
             if consistency_score > 0.7 or len(auto_corr_peaks) > 10:
@@ -206,7 +284,12 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {"detected": False, "confidence": 0.0, "details": []}
+        result = {
+            "detected": False,
+            "confidence": 0.0,
+            "details": [],
+            "evidence_metrics": {"channels": []},
+        }
 
         # Echo watermarks use delays of 1-50 ms.  We only need
         # autocorrelation out to ~50 ms, not the full O(N^2) correlate.
@@ -265,6 +348,13 @@ class WatermarkDetector:
                             "type": "patterned_echoes",
                         }
                     )
+            result["evidence_metrics"]["channels"].append(
+                {
+                    "channel": channel_idx,
+                    "echo_delays_ms": [float(delay) for delay in echo_delays],
+                    "echo_strengths": [float(strength) for strength in echo_strengths],
+                }
+            )
 
         return result
 
@@ -281,7 +371,12 @@ class WatermarkDetector:
         Returns:
             Dict containing analysis results
         """
-        result = {"detected": False, "confidence": 0.0, "details": []}
+        result = {
+            "detected": False,
+            "confidence": 0.0,
+            "details": [],
+            "evidence_metrics": {"channels": []},
+        }
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -344,6 +439,13 @@ class WatermarkDetector:
                         "type": "statistical_anomaly",
                     }
                 )
+            result["evidence_metrics"]["channels"].append(
+                {
+                    "channel": channel_idx,
+                    "features": features,
+                    "anomalies": anomalies,
+                }
+            )
 
         return result
 
@@ -360,7 +462,12 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {"detected": False, "confidence": 0.0, "details": []}
+        result = {
+            "detected": False,
+            "confidence": 0.0,
+            "details": [],
+            "evidence_metrics": {"channels": []},
+        }
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -394,6 +501,13 @@ class WatermarkDetector:
                         "type": "phase_pattern",
                     }
                 )
+            result["evidence_metrics"]["channels"].append(
+                {
+                    "channel": channel_idx,
+                    "phase_mean": float(phase_mean),
+                    "phase_consistency": float(consistency_score),
+                }
+            )
 
         return result
 
@@ -410,7 +524,12 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {"detected": False, "confidence": 0.0, "details": []}
+        result = {
+            "detected": False,
+            "confidence": 0.0,
+            "details": [],
+            "evidence_metrics": {"channels": []},
+        }
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -444,6 +563,13 @@ class WatermarkDetector:
                             "type": "amplitude_modulation",
                         }
                     )
+                result["evidence_metrics"]["channels"].append(
+                    {
+                        "channel": channel_idx,
+                        "modulation_peaks": int(len(modulation_peaks)),
+                        "max_modulation_power": float(np.max(modulation_power)),
+                    }
+                )
 
         return result
 
@@ -460,7 +586,12 @@ class WatermarkDetector:
         Returns:
             Dict containing detection results
         """
-        result = {"detected": False, "confidence": 0.0, "details": []}
+        result = {
+            "detected": False,
+            "confidence": 0.0,
+            "details": [],
+            "evidence_metrics": {"windows": []},
+        }
 
         for channel_idx in range(audio_data.shape[1]):
             channel_data = audio_data[:, channel_idx]
@@ -521,6 +652,15 @@ class WatermarkDetector:
                             "type": "consistent_spectral_peaks",
                         }
                     )
+                result["evidence_metrics"]["windows"].append(
+                    {
+                        "channel": channel_idx,
+                        "window_size": window_size,
+                        "spectral_flatness": float(avg_flatness),
+                        "peak_consistency": float(peak_consistency),
+                        "avg_peaks": float(np.mean(spectral_peaks)),
+                    }
+                )
 
         return result
 

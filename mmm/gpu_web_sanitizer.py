@@ -19,6 +19,9 @@ import librosa
 import numpy as np
 import soundfile as sf
 
+from .forensic_report import write_forensic_report
+from .processing_profile import build_processing_profile
+
 
 DEFAULT_GPU_CHUNK_SECONDS = 20.0
 DEFAULT_GPU_OVERLAP_SECONDS = 0.25
@@ -112,29 +115,53 @@ def gpu_web_sanitize(
         raise RuntimeError("GPU output still contains metadata tags")
 
     total_time = time.time() - start_time
+    profile = build_processing_profile(
+        engine="gpu_cuda_web",
+        paranoid_mode=paranoid_mode,
+        methods_used=[
+            "cuda_spectral_phase_perturbation",
+            "gpu_dither",
+            "clean_export",
+            "metadata_verification",
+            "signal_delta_verification",
+        ],
+        passes_run=1,
+    )
+    stats = {
+        "metadata_removed": 1,
+        "watermarks_removed": 0,
+        "watermarks_detected": 0,
+        "processing_time": total_time,
+        "processing_speed": f"{duration / max(total_time, 1e-9):.1f}x real-time",
+        "processing_engine": profile.engine,
+        "gpu_acceleration": True,
+        "gpu_device": gpu_name,
+        "gpu_chunks_processed": chunks_processed,
+        "gpu_chunk_seconds": chunk_seconds,
+        "input_sha256": input_hash,
+        "output_sha256": output_hash,
+        "output_hash_changed": True,
+        "metadata_clean": metadata_clean,
+        "methods_used": profile.methods_used,
+        "passes_run": profile.passes_run,
+        "processing_profile": profile.to_dict(),
+        "gpu_buffer_signal_delta_ratio": buffer_verification["signal_delta_ratio"],
+        "gpu_buffer_signal_delta_db": buffer_verification["signal_delta_db"],
+        **output_verification,
+    }
+    report_path = write_forensic_report(
+        input_file=input_path,
+        output_file=output_path,
+        stats=stats,
+        metadata_clean=metadata_clean,
+        signal_delta=output_verification,
+    )
+    stats["forensic_report"] = str(report_path)
 
     return {
         "success": True,
         "output_file": str(output_path),
-        "stats": {
-            "metadata_removed": 1,
-            "watermarks_removed": 0,
-            "watermarks_detected": 0,
-            "processing_time": total_time,
-            "processing_speed": f"{duration / max(total_time, 1e-9):.1f}x real-time",
-            "processing_engine": "gpu_cuda_web",
-            "gpu_acceleration": True,
-            "gpu_device": gpu_name,
-            "gpu_chunks_processed": chunks_processed,
-            "gpu_chunk_seconds": chunk_seconds,
-            "input_sha256": input_hash,
-            "output_sha256": output_hash,
-            "output_hash_changed": True,
-            "metadata_clean": metadata_clean,
-            "gpu_buffer_signal_delta_ratio": buffer_verification["signal_delta_ratio"],
-            "gpu_buffer_signal_delta_db": buffer_verification["signal_delta_db"],
-            **output_verification,
-        },
+        "stats": stats,
     }
 
 

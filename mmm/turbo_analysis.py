@@ -54,6 +54,10 @@ def analyze_audio_chunk_gpu(args):
             "detected": gpu_result["detected"],
             "confidence": gpu_result["confidence"],
             "method": "gpu_spectral",
+            "detector_type": gpu_result.get("detector_type", "heuristic_threshold"),
+            "heuristic_indicator": gpu_result.get("heuristic_indicator", True),
+            "evidence_metrics": gpu_result.get("evidence_metrics", {}),
+            "calibration": gpu_result.get("calibration", {}),
         }
 
     except Exception as e:
