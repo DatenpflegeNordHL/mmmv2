@@ -303,7 +303,7 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   border:1px solid rgba(125,211,252,.2);
   box-shadow:inset 0 0 28px rgba(14,165,233,.08),0 0 36px rgba(168,85,247,.1);
 }
-.visualizer-header{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.38rem}
+.visualizer-header{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.38rem;min-width:0}
 .visualizer-title{color:#e2e8f0;font-size:.74rem;font-weight:850}
 .wave-canvas{
   display:block;width:100%;height:84px;border-radius:14px;
@@ -318,47 +318,49 @@ footer.footer-credits .credit-secondary{color:#7f7598}
 }
 .visualizer-button:disabled{opacity:.45;cursor:not-allowed}
 .visualizer-button:not(:disabled):hover{border-color:#67e8f9;color:#fff;box-shadow:0 0 22px rgba(14,165,233,.24)}
-.visualizer-status{color:#94a3b8;font-size:.7rem;text-align:right}
+.visualizer-status{color:#94a3b8;font-size:.68rem;text-align:right;min-width:0;overflow-wrap:anywhere;line-height:1.2}
 .console-hint-row{padding:.55rem .2rem 0;color:#94a3b8;font-size:.68rem}
 .control-strip,.analysis-preview,.spectral-risk-grid,.timeline-panel{
   margin-top:.65rem;border-radius:18px;background:rgba(8,13,30,.72);
   border:1px solid rgba(148,163,184,.16);box-shadow:inset 0 0 28px rgba(30,41,59,.45);
   padding:.68rem;
 }
-.mode-group{display:grid;grid-template-columns:repeat(5,1fr);gap:.42rem;margin-bottom:.58rem}
+.mode-group{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.52rem;margin-bottom:.78rem}
 .mode-button{
   border:1px solid rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.68);
-  color:#cbd5e1;padding:.45rem .38rem;font-size:.72rem;font-weight:750;cursor:pointer;
+  color:#cbd5e1;padding:.52rem .42rem;font-size:.66rem;font-weight:750;cursor:pointer;
+  min-width:0;min-height:46px;line-height:1.16;text-align:center;white-space:normal;overflow-wrap:anywhere;
 }
 .mode-button.active{color:#fff;border-color:rgba(125,211,252,.7);box-shadow:0 0 18px rgba(14,165,233,.2)}
-.control-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
-.control-grid label{display:flex;flex-direction:column;gap:.24rem;color:#94a3b8;font-size:.68rem}
+.control-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.68rem .58rem}
+.control-grid label{display:flex;flex-direction:column;gap:.34rem;color:#94a3b8;font-size:.66rem;min-width:0;line-height:1.18}
 .control-grid select{
-  background:#020617;color:#f8fafc;border:1px solid rgba(148,163,184,.28);border-radius:9px;padding:.38rem .46rem;font-size:.72rem;
+  background:#020617;color:#f8fafc;border:1px solid rgba(148,163,184,.28);border-radius:9px;padding:.44rem .48rem;font-size:.7rem;min-width:0;width:100%;
 }
-.action-row{margin-top:.58rem;justify-content:flex-start}
-.action-row .btn-primary{width:auto;min-width:160px;margin:0}
+.action-row{margin-top:.82rem;justify-content:flex-start}
+.action-row .btn-primary{width:auto;min-width:180px;margin:0}
 .analysis-preview{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
 .meter-card,.metric-card,.spectral-risk-grid div{
   background:linear-gradient(180deg,rgba(15,23,42,.82),rgba(2,6,23,.75));
-  border:1px solid rgba(148,163,184,.15);border-radius:13px;padding:.58rem;
+  border:1px solid rgba(148,163,184,.15);border-radius:13px;padding:.58rem;min-width:0;overflow-wrap:anywhere;line-height:1.2;
 }
 .lufs-card{grid-column:span 2}
-.metric-card span,.meter-card span,.spectral-risk-grid span{display:block;color:#94a3b8;font-size:.65rem;margin-bottom:.22rem}
-.metric-card strong,.meter-card strong,.spectral-risk-grid strong{color:#f8fafc;font-size:.82rem}
+.metric-card span,.meter-card span,.spectral-risk-grid span{display:block;color:#94a3b8;font-size:.6rem;margin-bottom:.24rem;line-height:1.18;overflow-wrap:anywhere}
+.metric-card strong,.meter-card strong,.spectral-risk-grid strong{display:block;color:#f8fafc;font-size:.76rem;line-height:1.16;overflow-wrap:anywhere}
 .lufs-card small{display:block;margin-top:.12rem;color:#c4b5fd;font-size:.64rem}
 .metric-card.readiness strong{color:#67e8f9}
 .lufs-meter{height:7px;border-radius:999px;background:#111827;margin-top:.7rem;overflow:hidden}
 .lufs-meter span{display:block;height:100%;width:0;background:linear-gradient(90deg,#22c55e,#38bdf8,#a855f7);transition:width .35s}
 .spectral-risk-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
-.timeline-panel h2{font-size:.78rem;color:#e2e8f0;margin-bottom:.48rem}
-.timeline-panel ol{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:.4rem;list-style:none;counter-reset:steps}
+.timeline-panel h2{font-size:.8rem;color:#e2e8f0;margin-bottom:.6rem;line-height:1.2}
+.timeline-panel ol{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.52rem;list-style:none;counter-reset:steps}
 .timeline-panel li{
-  counter-increment:steps;position:relative;padding:.46rem .42rem .46rem 1.62rem;border-radius:11px;
-  background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.14);color:#94a3b8;font-size:.62rem;
+  counter-increment:steps;position:relative;padding:.62rem .52rem .62rem 1.82rem;border-radius:11px;
+  background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.14);color:#94a3b8;font-size:.6rem;
+  min-width:0;line-height:1.2;overflow-wrap:anywhere;
 }
 .timeline-panel li::before{
-  content:counter(steps);position:absolute;left:.38rem;top:.42rem;width:.92rem;height:.92rem;border-radius:50%;
+  content:counter(steps);position:absolute;left:.48rem;top:.58rem;width:.88rem;height:.88rem;border-radius:50%;
   display:grid;place-items:center;background:#1e293b;color:#cbd5e1;font-size:.56rem;font-weight:800;
 }
 .timeline-panel li.done{border-color:rgba(34,197,94,.45);color:#dcfce7}
@@ -366,9 +368,14 @@ footer.footer-credits .credit-secondary{color:#7f7598}
 .download-actions{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin:.8rem 0}
 .btn-download.subtle{background:linear-gradient(90deg,#1e293b,#334155);box-shadow:none}
 @media (max-width:760px){
-  .mode-group,.control-grid,.analysis-preview,.spectral-risk-grid,.timeline-panel ol{grid-template-columns:1fr}
+  .mode-group,.control-grid,.analysis-preview,.spectral-risk-grid{grid-template-columns:1fr}
+  .timeline-panel ol{grid-template-columns:repeat(2,minmax(0,1fr))}
   .lufs-card{grid-column:auto}
   .action-row .btn-primary{width:100%}
+}
+@media (max-width:520px){
+  .timeline-panel ol{grid-template-columns:1fr}
+  .mode-group{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (min-width:900px){
   main.quality-console{
@@ -378,16 +385,15 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   .console-card,.visualizer-card,.control-strip,.timeline-panel{grid-column:1}
   .analysis-preview,.spectral-risk-grid,#status,#result,#error{grid-column:2}
   .console-card{grid-row:1}
-  .analysis-preview{grid-row:1 / span 2;margin-top:0}
-  .control-strip{grid-row:2}
-  .spectral-risk-grid{grid-row:3;margin-top:0}
-  .timeline-panel{grid-row:3;margin-top:0}
-  #status,#result,#error{grid-row:4;margin-top:.55rem}
+  .visualizer-card{grid-row:2}
+  .control-strip{grid-row:3}
+  .timeline-panel{grid-row:4}
+  .analysis-preview{grid-row:1;margin-top:0}
+  .spectral-risk-grid{grid-row:2;margin-top:0}
+  #status,#result,#error{grid-row:3 / span 2;margin-top:.55rem}
   .analysis-preview{grid-template-columns:repeat(2,minmax(0,1fr))}
   .spectral-risk-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
-  .timeline-panel ol{grid-template-columns:repeat(8,minmax(0,1fr));gap:.28rem}
-  .timeline-panel li{padding:.38rem .28rem .38rem 1.25rem;font-size:.52rem;line-height:1.08}
-  .timeline-panel li::before{left:.3rem;top:.38rem;width:.74rem;height:.74rem;font-size:.48rem}
+  .timeline-panel ol{grid-template-columns:repeat(4,minmax(0,1fr));gap:.48rem}
   .control-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 """
@@ -427,9 +433,6 @@ JS_APP = """\
   document.querySelectorAll('.mode-button').forEach(btn => {
     btn.addEventListener('click', () => setMode(btn.dataset.mode));
   });
-  $('analyzeOnlyBtn').addEventListener('click', () => { setMode('analyze_only'); processFile(); });
-  $('safeMasterBtn').addEventListener('click', () => { setMode('safe_master'); processFile(); });
-  $('naturalizeBtn').addEventListener('click', () => { setMode('naturalize'); processFile(); });
   $('loudnessTarget').addEventListener('change', () => {
     const label = $('loudnessTarget').selectedOptions[0].textContent;
     $('metricTarget').textContent = 'Target: ' + label;
@@ -1112,9 +1115,6 @@ HTML_TEMPLATE = """\
     </div>
     <div class="action-row">
       <button id="processBtn" class="btn-primary">Analyze &amp; Master</button>
-      <button id="analyzeOnlyBtn" class="btn-secondary" type="button">Analyze Only</button>
-      <button id="safeMasterBtn" class="btn-secondary" type="button">Safe Master</button>
-      <button id="naturalizeBtn" class="btn-secondary" type="button">Naturalize Pass</button>
     </div>
   </section>
 

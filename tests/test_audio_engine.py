@@ -196,6 +196,11 @@ def test_web_ui_renders_audio_quality_console():
     assert "ENGINE ACTIVE" in html
     assert "Analyze &amp; Master" in html
     assert "Metadata Clean" in html
+    assert 'id="processBtn"' in html
+    for mode in ("analyze_only", "safe_master", "naturalize", "full_release", "metadata_clean"):
+        assert f'data-mode="{mode}"' in html
+    for removed_id in ("analyzeOnlyBtn", "safeMasterBtn", "naturalizeBtn"):
+        assert removed_id not in html
     assert "Aggressive full clean profile" not in html
     assert "Melodic Metadata Massacrer" not in html
     assert "Browser-based audio sanitizer" not in html
@@ -208,9 +213,10 @@ def test_web_ui_renders_audio_quality_console():
     assert "/api/preview/" in html
     assert "requestAnimationFrame" in html
     assert "createMediaElementSource" in html
+    assert ".timeline-panel ol{display:grid;grid-template-columns:repeat(4" in html
 
 
-def test_web_ui_keeps_quality_mode_when_legacy_profile_checked():
+def test_web_ui_has_single_primary_processing_action():
     app = create_app(max_file_size=1024 * 1024)
     client = app.test_client()
 
@@ -219,8 +225,12 @@ def test_web_ui_keeps_quality_mode_when_legacy_profile_checked():
 
     assert response.status_code == 200
     assert "const mode = selectedMode;" in html
+    assert "$('processBtn').addEventListener('click', processFile);" in html
     assert "paranoid ? 'legacy_sanitize' : selectedMode" not in html
     assert "legacy_sanitize: 'Legacy GPU Clean'" not in html
+    assert "$('analyzeOnlyBtn')" not in html
+    assert "$('safeMasterBtn')" not in html
+    assert "$('naturalizeBtn')" not in html
 
 
 def test_web_status_exposes_quality_engine_schema():
