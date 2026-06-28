@@ -101,6 +101,8 @@ def cli(ctx):
     from audio files, making AI-generated music untraceable.
     """
     ctx.ensure_object(dict)
+    if ctx.invoked_subcommand == "server":
+        return
 
     # Display epic banner
     banner.show_main_banner()
@@ -956,9 +958,9 @@ def config_reset():
 )
 def server(host, port, max_size):
     """
-    🌐 Launch browser-based audio sanitizer
+    🌐 Launch the MMV2 Audio Quality Engine
 
-    Starts a local web server with drag-and-drop audio sanitization.
+    Starts a local web server with drag-and-drop audio quality processing.
     Open the displayed URL in your browser to use the web interface.
 
     Examples:

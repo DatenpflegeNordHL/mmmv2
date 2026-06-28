@@ -29,6 +29,8 @@ def render_safe_master(
     *,
     limits: GuardrailLimits = DEFAULT_LIMITS,
     mono_bass_hz: float = 100.0,
+    target_lufs: float = -14.0,
+    output_sample_rate: int | None = None,
 ) -> dict[str, Any]:
     """Render a conservative safe master and return an explainable report."""
     loaded = load_audio(input_path)
@@ -36,7 +38,6 @@ def render_safe_master(
     audio = loaded["audio"].copy()
     steps: list[dict[str, Any]] = []
 
-    target_lufs = -14.0
     current_lufs = float(before["integrated_lufs"])
     input_gain_db = float(np.clip(target_lufs - current_lufs, -3.0, 3.0))
     if abs(input_gain_db) > 0.05:
@@ -76,11 +77,16 @@ def render_safe_master(
     audio, limiter_stats = peak_limiter(audio, ceiling_dbtp=limits.limiter_ceiling_dbtp)
     steps.append({"name": "final_peak_limiter", **limiter_stats})
     audio = ensure_finite_audio(audio)
+    write_sample_rate = int(loaded["sample_rate"])
+    if output_sample_rate is not None and int(output_sample_rate) != write_sample_rate:
+        audio = _resample_audio(audio, write_sample_rate, int(output_sample_rate))
+        write_sample_rate = int(output_sample_rate)
+        steps.append({"name": "sample_rate_convert", "sample_rate": write_sample_rate})
 
     output = write_audio(
         output_path,
         audio,
-        loaded["sample_rate"],
+        write_sample_rate,
         bit_depth=limits.export_default_bit_depth,
     )
     after = analyze_quality(output)
@@ -96,3 +102,26 @@ def render_safe_master(
         "after": after,
         "comparison": comparison,
     }
+
+
+def _resample_audio(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+    """Resample channel-preserving audio for explicit export-rate requests."""
+    if target_rate <= 0:
+        raise ValueError("target_rate must be positive")
+    if source_rate == target_rate:
+        return audio
+    try:
+        import soxr
+
+        return soxr.resample(np.asarray(audio, dtype=np.float64), source_rate, target_rate)
+    except Exception:
+        import librosa
+
+        data = np.asarray(audio, dtype=np.float64)
+        if data.ndim == 1:
+            return librosa.resample(data, orig_sr=source_rate, target_sr=target_rate)
+        channels = [
+            librosa.resample(data[:, channel], orig_sr=source_rate, target_sr=target_rate)
+            for channel in range(data.shape[1])
+        ]
+        return np.column_stack(channels)

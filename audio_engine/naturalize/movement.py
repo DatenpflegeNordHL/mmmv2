@@ -19,6 +19,8 @@ def render_naturalized_master(
     output_path: str | Path,
     *,
     limits: GuardrailLimits = DEFAULT_LIMITS,
+    target_lufs: float = -14.0,
+    output_sample_rate: int | None = None,
 ) -> dict[str, Any]:
     """Apply subtle segment automation before the safe-master chain."""
     loaded = load_audio(input_path)
@@ -26,7 +28,13 @@ def render_naturalized_master(
     moved_audio = apply_energy_automation(loaded["audio"], loaded["sample_rate"], automation)
     temp_path = Path(output_path).with_suffix(".naturalize-stage.wav")
     write_audio(temp_path, moved_audio, loaded["sample_rate"], bit_depth=limits.export_default_bit_depth)
-    report = render_safe_master(temp_path, output_path, limits=limits)
+    report = render_safe_master(
+        temp_path,
+        output_path,
+        limits=limits,
+        target_lufs=target_lufs,
+        output_sample_rate=output_sample_rate,
+    )
     try:
         temp_path.unlink()
     except OSError:

@@ -1,5 +1,6 @@
 import json
 import time
+import builtins
 from io import BytesIO
 from pathlib import Path
 
@@ -9,9 +10,11 @@ from click.testing import CliRunner
 
 from audio_engine.analysis.readiness import analyze_quality
 from audio_engine.dsp.pipeline import render_safe_master
+from audio_engine.io.writer import write_audio
 from audio_engine.naturalize.movement import render_naturalized_master
 from audio_engine.reports.before_after import compare_masters
 from mmm.cli import cli
+import mmm.server as server_module
 from mmm.server import create_app
 
 
@@ -53,6 +56,49 @@ def test_safe_master_writes_audio_and_before_after_report(tmp_path):
     assert report["guardrails"]["passed"] is True
     assert report["before"]["sample_rate"] == report["after"]["sample_rate"]
     assert "integrated_lufs_delta" in report["comparison"]
+
+
+def test_safe_master_honors_output_sample_rate(tmp_path):
+    input_file = _write_stereo_test_file(tmp_path / "input.wav", sample_rate=44100)
+    output_file = tmp_path / "master.wav"
+
+    report = render_safe_master(input_file, output_file, output_sample_rate=48000)
+    info = sf.info(output_file)
+
+    assert info.samplerate == 48000
+    assert report["after"]["sample_rate"] == 48000
+    assert any(step["name"] == "sample_rate_convert" for step in report["processing_steps"])
+
+
+def test_safe_master_honors_target_lufs_parameter(tmp_path):
+    input_file = _write_stereo_test_file(tmp_path / "input.wav")
+    output_file = tmp_path / "master.wav"
+
+    report = render_safe_master(input_file, output_file, target_lufs=-16.0)
+    input_gain_step = next(
+        step for step in report["processing_steps"] if step["name"] == "input_gain_staging"
+    )
+
+    expected_gain = np.clip(-16.0 - report["before"]["integrated_lufs"], -3.0, 3.0)
+    assert input_gain_step["gain_db"] == expected_gain
+
+
+def test_write_audio_supports_metadata_free_mp3_export(tmp_path):
+    output_file = tmp_path / "master.mp3"
+    sample_rate = 44100
+    t = np.linspace(0, 0.25, int(sample_rate * 0.25), endpoint=False)
+    audio = np.column_stack(
+        [
+            0.1 * np.sin(2 * np.pi * 220 * t),
+            0.1 * np.sin(2 * np.pi * 221 * t),
+        ]
+    ).astype(np.float32)
+
+    write_audio(output_file, audio, sample_rate)
+
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
+    assert output_file.read_bytes()[:3] != b"ID3"
 
 
 def test_naturalize_records_automation_and_writes_master(tmp_path):
@@ -149,11 +195,17 @@ def test_web_ui_renders_audio_quality_console():
     assert "Release-Ready Stereo Mastering" in html
     assert "ENGINE ACTIVE" in html
     assert "Analyze &amp; Master" in html
-    assert "Meta Data Clean" in html
-    assert "Aggressive full clean profile" in html
+    assert "Metadata Clean" in html
+    assert "Aggressive full clean profile" not in html
+    assert "Melodic Metadata Massacrer" not in html
+    assert "Browser-based audio sanitizer" not in html
+    for forbidden in ("watermark", "fingerprint", "evasion", "bypass", "Legacy GPU"):
+        assert forbidden not in html
+    assert 'class="visualizer-card"' in html
     assert 'id="waveCanvas"' in html
     assert 'id="playPreviewBtn"' in html
     assert 'id="previewAudio"' in html
+    assert "/api/preview/" in html
     assert "requestAnimationFrame" in html
     assert "createMediaElementSource" in html
 
@@ -183,6 +235,29 @@ def test_web_status_exposes_quality_engine_schema():
     assert "metadata_clean" in payload["metadata_modes"]
     assert "safe_master" in payload["quality_modes"]
     assert "streaming_safe" in payload["loudness_targets"]
+    assert "gpu" in payload
+    assert "available" in payload["gpu"]
+
+
+def test_web_status_survives_missing_torch(monkeypatch):
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "torch":
+            raise ImportError("torch missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+
+    response = client.get("/api/status")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["gpu_available"] is False
+    assert payload["gpu"]["backend"] == "cpu"
+    assert "torch missing" in payload["gpu"]["error"]
 
 
 def test_web_quality_safe_master_job_returns_metrics_and_reports(tmp_path):
@@ -226,48 +301,10 @@ def test_web_quality_safe_master_job_returns_metrics_and_reports(tmp_path):
     assert result["report_artifacts"]["html_download_token"]
 
 
-def test_web_metadata_clean_job_runs_full_legacy_preserving_profile(monkeypatch, tmp_path):
-    import mmm.preserving_sanitizer as preserving_module
-
+def test_web_metadata_clean_job_runs_metadata_only_export(tmp_path):
     input_file = _write_stereo_test_file(tmp_path / "input.wav")
     app = create_app(max_file_size=1024 * 1024)
     client = app.test_client()
-    expected_methods = [
-        "metadata_clean_export",
-        "spectral_watermark_cleaning",
-        "fingerprint_removal",
-        "hf_noise_and_dither",
-        "humanization",
-        "micro_resample_warp",
-        "analog_warmth",
-        "micro_ambience",
-        "gentle_bandlimit",
-        "phase_swirl",
-        "phase_noise_fft",
-        "dynamic_comb_mask",
-        "transient_micro_shift",
-        "onset_velocity_variation",
-        "long_range_tempo_drift",
-        "mfcc_perturbation",
-        "clarity_tilt",
-    ]
-
-    def fake_preserving_sanitize(input_file, output_file=None, **kwargs):
-        assert kwargs["paranoid_mode"] is True
-        output_path = Path(input_file).with_suffix(".clean.wav")
-        output_path.write_bytes(b"clean")
-        return {
-            "success": True,
-            "output_file": str(output_path),
-            "stats": {
-                "processing_engine": "cpu_preserving",
-                "gpu_acceleration": False,
-                "metadata_clean": True,
-                "methods_used": expected_methods.copy(),
-            },
-        }
-
-    monkeypatch.setattr(preserving_module, "preserving_sanitize", fake_preserving_sanitize)
 
     with input_file.open("rb") as handle:
         response = client.post(
@@ -298,35 +335,17 @@ def test_web_metadata_clean_job_runs_full_legacy_preserving_profile(monkeypatch,
     assert result["download_token"]
     assert result["metrics_before"] is None
     assert result["metrics_after"] is None
-    assert stats["processing_engine"] == "metadata_clean_full_legacy"
+    assert stats["processing_engine"] == "metadata_clean_export"
     assert stats["gpu_acceleration"] is False
-    assert "strict_metadata_verification" in stats["methods_used"]
-    for method in expected_methods:
-        assert method in stats["methods_used"]
+    assert stats["metadata_clean"] is True
+    assert all("watermark" not in method for method in stats["methods_used"])
+    assert all("fingerprint" not in method for method in stats["methods_used"])
 
 
-def test_web_legacy_sanitize_alias_maps_to_metadata_clean(monkeypatch, tmp_path):
-    import mmm.preserving_sanitizer as preserving_module
-
+def test_web_legacy_sanitize_alias_maps_to_metadata_clean_export(tmp_path):
     input_file = _write_stereo_test_file(tmp_path / "input.wav")
     app = create_app(max_file_size=1024 * 1024)
     client = app.test_client()
-
-    def fake_preserving_sanitize(input_file, output_file=None, **_kwargs):
-        output_path = Path(input_file).with_suffix(".clean.wav")
-        output_path.write_bytes(b"clean")
-        return {
-            "success": True,
-            "output_file": str(output_path),
-            "stats": {
-                "processing_engine": "cpu_preserving",
-                "gpu_acceleration": False,
-                "metadata_clean": True,
-                "methods_used": ["metadata_clean_export", "fingerprint_removal"],
-            },
-        }
-
-    monkeypatch.setattr(preserving_module, "preserving_sanitize", fake_preserving_sanitize)
 
     with input_file.open("rb") as handle:
         response = client.post(
@@ -351,7 +370,27 @@ def test_web_legacy_sanitize_alias_maps_to_metadata_clean(monkeypatch, tmp_path)
         raise AssertionError(f"legacy alias job did not complete: {payload}")
 
     assert payload["result"]["mode"] == "metadata_clean"
-    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_full_legacy"
+    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_export"
+
+
+def test_web_preview_endpoint_does_not_consume_download_token(tmp_path):
+    app = create_app(max_file_size=1024 * 1024)
+    client = app.test_client()
+    artifact = Path(app.config["UPLOAD_FOLDER"]) / "preview.txt"
+    artifact.write_text("preview-data", encoding="utf-8")
+    token = server_module._register_download(app, artifact, "preview.txt")
+
+    preview = client.get(f"/api/preview/{token}")
+    download = client.get(f"/api/download/{token}")
+
+    assert preview.status_code == 200
+    assert preview.get_data(as_text=True) == "preview-data"
+    assert download.status_code == 200
+    assert download.get_data(as_text=True) == "preview-data"
+
+
+def test_quality_output_extension_supports_mp3(tmp_path):
+    assert server_module._quality_output_extension(tmp_path / "mix.wav", "mp3") == ".mp3"
 
 
 def test_web_rejects_unsupported_quality_upload_extension():

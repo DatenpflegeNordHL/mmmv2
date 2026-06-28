@@ -805,7 +805,7 @@ def test_server_upload_runs_metadata_clean_background_job(monkeypatch):
             "success": True,
             "output_file": str(output_path),
             "stats": {
-                "processing_engine": "metadata_clean_full_legacy",
+                "processing_engine": "metadata_clean_export",
                 "gpu_acceleration": False,
                 "metadata_clean": True,
             },
@@ -818,6 +818,7 @@ def test_server_upload_runs_metadata_clean_background_job(monkeypatch):
         data={
             "file": (BytesIO(b"audio"), "test.wav"),
             "format": "preserve",
+            "mode": "metadata_clean",
             "paranoid": "false",
         },
         content_type="multipart/form-data",
@@ -828,7 +829,7 @@ def test_server_upload_runs_metadata_clean_background_job(monkeypatch):
     payload = job_response.get_json()
     assert payload["status"] == "complete"
     assert payload["result"]["mode"] == "metadata_clean"
-    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_full_legacy"
+    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_export"
     assert payload["result"]["stats"]["gpu_acceleration"] is False
 
 
@@ -847,7 +848,7 @@ def test_server_upload_accepts_flac_output_option(monkeypatch):
         return {
             "success": True,
             "output_file": str(output_path),
-            "stats": {"processing_engine": "metadata_clean_full_legacy"},
+            "stats": {"processing_engine": "metadata_clean_export"},
         }
 
     monkeypatch.setattr(server_module, "_process_metadata_clean_job", fake_metadata_clean_job)
@@ -857,6 +858,7 @@ def test_server_upload_accepts_flac_output_option(monkeypatch):
         data={
             "file": (BytesIO(b"audio"), "test.wav"),
             "format": "flac",
+            "mode": "metadata_clean",
             "paranoid": "false",
         },
         content_type="multipart/form-data",
@@ -884,7 +886,7 @@ def test_server_upload_legacy_mode_aliases_to_metadata_clean(monkeypatch):
             "success": True,
             "output_file": str(output_path),
             "stats": {
-                "processing_engine": "metadata_clean_full_legacy",
+                "processing_engine": "metadata_clean_export",
                 "gpu_acceleration": False,
             },
         }
@@ -908,5 +910,5 @@ def test_server_upload_legacy_mode_aliases_to_metadata_clean(monkeypatch):
     assert payload["status"] == "complete"
     assert seen["called"] is True
     assert payload["result"]["mode"] == "metadata_clean"
-    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_full_legacy"
+    assert payload["result"]["stats"]["processing_engine"] == "metadata_clean_export"
     assert payload["result"]["stats"]["gpu_acceleration"] is False

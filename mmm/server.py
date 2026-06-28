@@ -1,10 +1,11 @@
 """
-MMM Web Server — Browser-based audio sanitization via drag-and-drop.
+MMV2 Web Server - browser-based audio quality engine via drag-and-drop.
 
 Launch with: mmm server [--host 127.0.0.1] [--port 8778] [--max-size 500]
 """
 
 import atexit
+import hashlib
 import os
 import shutil
 import tempfile
@@ -17,8 +18,6 @@ from typing import Dict, Any, Optional, Union
 from flask import Flask, request, jsonify, send_file, Response
 from mutagen import File as MutagenFile
 from werkzeug.utils import secure_filename
-
-from .gpu_web_sanitizer import cuda_available, gpu_web_sanitize
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -296,14 +295,22 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   display:inline-flex;align-items:center;gap:.45rem;color:#bbf7d0;font-size:.7rem;font-weight:800;letter-spacing:.08em;
 }
 .active-dot{width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 14px #22c55e}
-.quality-dropzone{padding:clamp(.58rem,1.25vw,.9rem) .65rem .6rem;border-color:rgba(125,211,252,.55)}
+.quality-dropzone{padding:clamp(.7rem,1.5vw,1.05rem) .7rem;border-color:rgba(125,211,252,.55)}
 .quality-dropzone .dropzone-icon{font-size:1.55rem;margin-bottom:.2rem}
+.visualizer-card{
+  margin-top:.65rem;padding:.58rem;border-radius:18px;
+  background:linear-gradient(180deg,rgba(8,13,30,.8),rgba(2,6,23,.72));
+  border:1px solid rgba(125,211,252,.2);
+  box-shadow:inset 0 0 28px rgba(14,165,233,.08),0 0 36px rgba(168,85,247,.1);
+}
+.visualizer-header{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.38rem}
+.visualizer-title{color:#e2e8f0;font-size:.74rem;font-weight:850}
 .wave-canvas{
-  display:block;width:100%;height:88px;margin-top:.5rem;border-radius:14px;
+  display:block;width:100%;height:84px;border-radius:14px;
   background:linear-gradient(90deg,rgba(14,165,233,.08),rgba(168,85,247,.14),rgba(34,197,94,.08));
   border:1px solid rgba(148,163,184,.14);
 }
-.visualizer-controls{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.5rem;flex-wrap:wrap}
+.visualizer-controls{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.44rem;flex-wrap:wrap}
 .visualizer-button{
   border:1px solid rgba(125,211,252,.42);border-radius:999px;background:rgba(2,6,23,.64);
   color:#e0f2fe;font-size:.72rem;font-weight:850;padding:.35rem .7rem;cursor:pointer;
@@ -324,12 +331,11 @@ footer.footer-credits .credit-secondary{color:#7f7598}
   color:#cbd5e1;padding:.45rem .38rem;font-size:.72rem;font-weight:750;cursor:pointer;
 }
 .mode-button.active{color:#fff;border-color:rgba(125,211,252,.7);box-shadow:0 0 18px rgba(14,165,233,.2)}
-.control-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.48rem}
+.control-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
 .control-grid label{display:flex;flex-direction:column;gap:.24rem;color:#94a3b8;font-size:.68rem}
 .control-grid select{
   background:#020617;color:#f8fafc;border:1px solid rgba(148,163,184,.28);border-radius:9px;padding:.38rem .46rem;font-size:.72rem;
 }
-.advanced-toggle span{display:flex;align-items:center;gap:.35rem;color:#cbd5e1;min-height:30px}
 .action-row{margin-top:.58rem;justify-content:flex-start}
 .action-row .btn-primary{width:auto;min-width:160px;margin:0}
 .analysis-preview{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.48rem}
@@ -369,7 +375,7 @@ footer.footer-credits .credit-secondary{color:#7f7598}
     display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr);
     gap:.62rem;align-items:start;
   }
-  .console-card,.control-strip,.timeline-panel{grid-column:1}
+  .console-card,.visualizer-card,.control-strip,.timeline-panel{grid-column:1}
   .analysis-preview,.spectral-risk-grid,#status,#result,#error{grid-column:2}
   .console-card{grid-row:1}
   .analysis-preview{grid-row:1 / span 2;margin-top:0}
@@ -439,7 +445,7 @@ JS_APP = """\
       safe_master: 'Analyze & Master',
       naturalize: 'Naturalize Pass',
       full_release: 'Analyze & Master',
-      metadata_clean: 'Meta Data Clean'
+      metadata_clean: 'Metadata Clean'
     };
     $('processBtn').textContent = labels[mode] || 'Analyze & Master';
   }
@@ -486,7 +492,7 @@ JS_APP = """\
   function processFile() {
     if (!selectedFile) return;
     const fmt = $('formatSelect').value;
-    const paranoid = $('paranoidToggle').checked;
+    const paranoid = false;
     const mode = selectedMode;
 
     // Show status
@@ -588,7 +594,7 @@ JS_APP = """\
     result.hidden = false;
     $('resultText').textContent = data.mode === 'analyze_only'
       ? 'Analysis report generated.'
-      : (data.mode === 'metadata_clean' ? 'Meta data clean complete.' : 'Mastering pass complete.');
+      : (data.mode === 'metadata_clean' ? 'Metadata clean complete.' : 'Mastering pass complete.');
     const stats = data.stats || {};
     updateMetrics(data);
     const rows = [
@@ -597,7 +603,7 @@ JS_APP = """\
       statRow('Output format', data.output_format || 'N/A'),
       statRow('Loudness target', data.loudness_target || 'N/A'),
       statRow('Limiter ceiling', data.true_peak_ceiling ? data.true_peak_ceiling + ' dBTP' : 'N/A'),
-      statRow('GPU', stats.gpu_acceleration ? (stats.gpu_device || 'Enabled') : 'Fallback/CPU'),
+      statRow('Acceleration', stats.gpu_acceleration ? (stats.gpu_device || 'GPU') : 'CPU'),
       statRow('Preview protected', formatBool(data.preview_protected)),
       statRow('Peak safety', data.peak_safety || 'Available after processing'),
       statRow('Signal changed', formatBool(stats.signal_changed)),
@@ -614,7 +620,7 @@ JS_APP = """\
       $('downloadLink').href = '/api/download/' + data.download_token;
       $('downloadLink').download = data.filename || 'master_audio';
       $('downloadLink').textContent = data.mode === 'metadata_clean' ? 'Download Clean Audio' : 'Download Master';
-      setPreviewAudio('/api/download/' + data.download_token, 'Processed audio ready');
+      setPreviewAudio('/api/preview/' + data.download_token, 'Processed audio ready');
     } else {
       $('downloadLink').hidden = true;
     }
@@ -669,7 +675,7 @@ JS_APP = """\
     const after = data.metrics_after || before;
     const metrics = after || {};
     if (data.mode === 'metadata_clean' && !data.metrics_after) {
-      resetMetrics('Meta data clean path');
+      resetMetrics('Metadata clean path');
       return;
     }
     $('metricLufs').textContent = formatMetric(metrics.integrated_lufs, ' LUFS');
@@ -786,7 +792,7 @@ JS_APP = """\
 
   function loadWaveformArtifact(token) {
     if (!token) return;
-    fetch('/api/download/' + encodeURIComponent(token), {cache:'no-store'})
+    fetch('/api/preview/' + encodeURIComponent(token), {cache:'no-store'})
       .then(resp => resp.ok ? resp.json() : null)
       .then(data => {
         if (!data || !Array.isArray(data.peaks)) return;
@@ -1036,19 +1042,25 @@ HTML_TEMPLATE = """\
         <p class="hint">WAV, FLAC, AIFF or MP3 &middot; max {max_size_mb} MB</p>
         <input type="file" id="fileInput" accept=".mp3,.wav,.flac,.aiff,.aif" hidden>
       </div>
-      <canvas id="waveCanvas" class="wave-canvas" width="720" height="104" aria-hidden="true"></canvas>
-      <div class="visualizer-controls">
-        <button id="playPreviewBtn" class="visualizer-button" type="button" disabled>Play</button>
-        <span id="visualizerStatus" class="visualizer-status">Drop audio to preview waveform</span>
-      </div>
-      <audio id="previewAudio" preload="metadata" hidden></audio>
     </div>
 
     <div class="console-hint-row">
       <span>Mono and stereo accepted</span>
       <span>Metadata parsed safely</span>
-      <span>Preview protected</span>
+      <span>Preview available</span>
     </div>
+  </section>
+
+  <section class="visualizer-card" aria-label="Audio preview visualizer">
+    <div class="visualizer-header">
+      <span class="visualizer-title">Preview Visualizer</span>
+      <span id="visualizerStatus" class="visualizer-status">Drop audio to preview waveform</span>
+    </div>
+    <canvas id="waveCanvas" class="wave-canvas" width="720" height="104" aria-hidden="true"></canvas>
+    <div class="visualizer-controls">
+      <button id="playPreviewBtn" class="visualizer-button" type="button" disabled>Play</button>
+    </div>
+    <audio id="previewAudio" preload="metadata" hidden></audio>
   </section>
 
   <section id="options" class="control-strip" hidden>
@@ -1057,7 +1069,7 @@ HTML_TEMPLATE = """\
       <button class="mode-button active" data-mode="safe_master" type="button">Safe Master</button>
       <button class="mode-button" data-mode="naturalize" type="button">Naturalize Pass</button>
       <button class="mode-button" data-mode="full_release" type="button">Full Release Pass</button>
-      <button class="mode-button" data-mode="metadata_clean" type="button">Meta Data Clean</button>
+      <button class="mode-button" data-mode="metadata_clean" type="button">Metadata Clean</button>
     </div>
     <div class="control-grid">
       <label>Output format
@@ -1096,9 +1108,6 @@ HTML_TEMPLATE = """\
           <option value="24">24-bit</option>
           <option value="32">32-bit float</option>
         </select>
-      </label>
-      <label class="advanced-toggle">Clean export
-        <span><input type="checkbox" id="paranoidToggle"> Aggressive full clean profile</span>
       </label>
     </div>
     <div class="action-row">
@@ -1174,7 +1183,7 @@ HTML_TEMPLATE = """\
 </main>
 <footer class="footer-credits">
   <div>MMV2 Audio Quality Engine — Local stereo mastering and release checks</div>
-  <div class="credit-secondary">Original open-source credit: geeknik/mmm • Retrowave redesign by Dirty D. Noir</div>
+  <div class="credit-secondary">Private beta for controlled audio quality review</div>
 </footer>
 </div>
 <script>{js}</script>
@@ -1286,6 +1295,45 @@ def _parse_quality_options(form: Any) -> dict[str, Any]:
     }
 
 
+def _gpu_status() -> dict[str, Any]:
+    """Return CUDA status without making torch a hard web dependency."""
+    status: dict[str, Any] = {
+        "available": False,
+        "backend": "cpu",
+        "device": None,
+        "vram_total_gb": None,
+        "vram_free_gb": None,
+        "compute_capability": None,
+        "error": None,
+    }
+    try:
+        import torch
+    except Exception as exc:
+        status["error"] = str(exc)
+        return status
+
+    try:
+        if not torch.cuda.is_available():
+            return status
+        device_index = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device_index)
+        free_bytes, total_bytes = torch.cuda.mem_get_info(device_index)
+        status.update(
+            {
+                "available": True,
+                "backend": "cuda",
+                "device": torch.cuda.get_device_name(device_index),
+                "vram_total_gb": round(total_bytes / 1024**3, 2),
+                "vram_free_gb": round(free_bytes / 1024**3, 2),
+                "compute_capability": f"{props.major}.{props.minor}",
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        status["error"] = str(exc)
+    return status
+
+
 # ---------------------------------------------------------------------------
 # Flask application factory
 # ---------------------------------------------------------------------------
@@ -1337,12 +1385,14 @@ def create_app(
         busy = not lock.acquire(blocking=False)
         if not busy:
             lock.release()
+        gpu = _gpu_status()
         return jsonify({
             "busy": busy,
             "version": "2.0.0",
             "engine_version": ENGINE_VERSION,
             "max_file_size_mb": max_size_mb,
-            "gpu_available": cuda_available(),
+            "gpu_available": gpu["available"],
+            "gpu": gpu,
             "metadata_modes": [METADATA_CLEAN_MODE],
             "quality_modes": sorted(QUALITY_MODES),
             "loudness_targets": LOUDNESS_TARGETS,
@@ -1364,7 +1414,7 @@ def create_app(
         except Exception:
             lock.release()
             app.logger.exception("Upload handler failed")
-            return jsonify({"error": "Sanitization failed. Please try a different file."}), 500
+            return jsonify({"error": "Processing failed. Please try a different file."}), 500
 
     @app.route("/api/job/<job_id>")
     def api_job(job_id: str) -> tuple:
@@ -1377,28 +1427,11 @@ def create_app(
 
     @app.route("/api/download/<token>")
     def api_download(token: str) -> tuple:
-        registry: dict = app.config["DOWNLOAD_REGISTRY"]
-        with app.config["DOWNLOAD_REGISTRY_LOCK"]:
-            _cleanup_download_registry(registry)
-            entry = registry.pop(token, None)
+        return _serve_registered_file(app, token, as_attachment=True, consume=True)
 
-        if entry is None:
-            return jsonify({"error": "File not found or expired."}), 404
-
-        file_path = Path(entry["path"])
-        if not file_path.exists():
-            return jsonify({"error": "File not found or expired."}), 404
-
-        filename = entry["filename"]
-
-        response = send_file(
-            str(file_path),
-            as_attachment=True,
-            download_name=filename,
-        )
-        # Clean up file after response is sent to client
-        response.call_on_close(lambda: file_path.unlink(missing_ok=True))
-        return response
+    @app.route("/api/preview/<token>")
+    def api_preview(token: str) -> tuple:
+        return _serve_registered_file(app, token, as_attachment=False, consume=False)
 
     @app.errorhandler(413)
     def _too_large(e):
@@ -1441,11 +1474,11 @@ def _handle_upload(app: Flask, processing_lock: threading.Lock) -> tuple:
         output_format = "preserve"
 
     paranoid = request.form.get("paranoid", "false").lower() == "true"
-    mode = request.form.get("mode", METADATA_CLEAN_MODE)
+    mode = request.form.get("mode", "safe_master")
     if mode in LEGACY_MODE_ALIASES:
         mode = METADATA_CLEAN_MODE
     elif mode not in QUALITY_MODES:
-        mode = METADATA_CLEAN_MODE
+        mode = "safe_master"
     quality_options = _parse_quality_options(request.form)
 
     # Save to temp directory with UUID prefix
@@ -1547,8 +1580,8 @@ def _process_upload_job(
                 job_id,
                 status="failed",
                 progress=100,
-                message="Sanitization failed.",
-                error=result.get("error", "Sanitization failed."),
+                message="Processing failed.",
+                error=result.get("error", "Processing failed."),
             )
             return
 
@@ -1604,54 +1637,12 @@ def _process_upload_job(
             job_id,
             status="failed",
             progress=100,
-            message="Sanitization failed.",
+            message="Processing failed.",
             error=str(exc),
         )
     finally:
         input_path.unlink(missing_ok=True)
         processing_lock.release()
-
-
-def _sanitize_gpu_first(
-    app: Flask,
-    input_path: Path,
-    output_format: Optional[str],
-    paranoid: bool,
-    job_id: str,
-) -> Dict[str, Any]:
-    try:
-        _update_job(app, job_id, progress=45, message="Processing spectral pass on GPU...")
-        return gpu_web_sanitize(
-            input_file=input_path,
-            output_file=None,
-            paranoid_mode=paranoid,
-            output_format=output_format,
-            verbose=False,
-        )
-    except Exception as exc:
-        app.logger.warning("GPU sanitizer failed; falling back to preserving sanitizer: %s", exc)
-        _update_job(
-            app,
-            job_id,
-            progress=60,
-            message="GPU path failed; using safe CPU fallback...",
-        )
-
-        from .preserving_sanitizer import preserving_sanitize
-
-        result = preserving_sanitize(
-            input_file=input_path,
-            output_file=None,
-            paranoid_mode=paranoid,
-            threat_count=0,
-            output_format=output_format,
-            verbose=False,
-        )
-        stats = result.setdefault("stats", {})
-        stats["processing_engine"] = "cpu_preserving_fallback"
-        stats["gpu_acceleration"] = False
-        stats["gpu_fallback_error"] = str(exc)
-        return result
 
 
 def _process_metadata_clean_job(
@@ -1663,41 +1654,69 @@ def _process_metadata_clean_job(
     *,
     strict_verification: bool,
 ) -> Dict[str, Any]:
-    """Run the full legacy-preserving clean profile under the metadata-clean mode."""
-    from .preserving_sanitizer import preserving_sanitize
+    """Run a metadata-only clean export for web uploads."""
+    from .sanitization.metadata_cleaner import MetadataCleaner
 
     _update_job(
         app,
         job_id,
         progress=55,
-        message="Running full meta data clean profile...",
+        message="Writing metadata-clean export...",
         processing_steps=["upload", "metadata", "render"],
     )
 
-    result = preserving_sanitize(
-        input_file=input_path,
-        output_file=None,
-        paranoid_mode=strict_verification,
-        threat_count=0,
-        output_format=output_format,
-        verbose=False,
-    )
-    if not result.get("success"):
-        return result
+    temp_dir: Path = app.config["UPLOAD_FOLDER"]
+    output_ext = _metadata_clean_output_extension(input_path, output_format)
+    output_path = temp_dir / f"{uuid.uuid4().hex}_{Path(safe_name).stem}.clean{output_ext}"
+    before_hash = _sha256_path(input_path)
 
-    stats = result.setdefault("stats", {})
+    if output_format and output_ext != input_path.suffix.lower():
+        result = _transcode_without_metadata(input_path, output_path, output_ext)
+    else:
+        result = MetadataCleaner().clean_file(input_path, output_path)
+    if not result.get("success"):
+        return {
+            "success": False,
+            "error": "; ".join(result.get("errors", [])) or "Metadata clean export failed.",
+            "stats": result,
+        }
+
+    cleaner = MetadataCleaner()
+    metadata_clean = not cleaner._verify_metadata_present(output_path)
+    after_hash = _sha256_path(output_path)
+    if strict_verification and not metadata_clean:
+        output_path.unlink(missing_ok=True)
+        return {
+            "success": False,
+            "error": "Metadata verification failed after export.",
+            "stats": result,
+        }
+
+    stats = {
+        "processing_engine": "metadata_clean_export",
+        "gpu_acceleration": False,
+        "gpu_device": None,
+        "metadata_removed": int(result.get("tags_removed", 0)) + int(result.get("chunks_removed", 0)),
+        "metadata_clean": metadata_clean,
+        "output_hash_changed": before_hash != after_hash,
+        "methods_used": list(result.get("methods_used", [])),
+        "strict_metadata_verification": bool(strict_verification),
+    }
     methods_used = list(stats.get("methods_used", []))
     if strict_verification:
-        methods_used.append("strict_metadata_verification")
+        methods_used.append("metadata_verification")
     stats["methods_used"] = methods_used
-    stats["processing_engine"] = "metadata_clean_full_legacy"
-    stats["gpu_acceleration"] = False
-    stats["gpu_device"] = None
 
-    result["timeline_steps"] = ["upload", "metadata", "render", "report"]
-    result["preview_protected"] = "N/A"
-    result["peak_safety"] = "N/A"
-    return result
+    return {
+        "success": True,
+        "output_file": str(output_path),
+        "stats": stats,
+        "timeline_steps": ["upload", "metadata", "render", "report"],
+        "preview_protected": "N/A",
+        "peak_safety": "N/A",
+        "metrics_before": None,
+        "metrics_after": None,
+    }
 
 
 def _process_quality_job(
@@ -1734,6 +1753,8 @@ def _process_quality_job(
             ),
         }
     )
+    target_lufs = float(LOUDNESS_TARGETS[str(quality_options["loudness_target"])]["target_lufs"])
+    output_sample_rate = _sample_rate_for_writer(str(quality_options["sample_rate_override"]))
 
     _update_job(
         app,
@@ -1773,9 +1794,21 @@ def _process_quality_job(
             processing_steps=["upload", "metadata", "loudness", "dc", "spectrum", "render"],
         )
         if mode == "naturalize":
-            report = render_naturalized_master(input_path, output_path, limits=limits)
+            report = render_naturalized_master(
+                input_path,
+                output_path,
+                limits=limits,
+                target_lufs=target_lufs,
+                output_sample_rate=output_sample_rate,
+            )
         else:
-            report = render_safe_master(input_path, output_path, limits=limits)
+            report = render_safe_master(
+                input_path,
+                output_path,
+                limits=limits,
+                target_lufs=target_lufs,
+                output_sample_rate=output_sample_rate,
+            )
 
     report["engine_version"] = ENGINE_VERSION
     report["mode"] = mode
@@ -1810,6 +1843,7 @@ def _process_quality_job(
         "short_term_lufs_curve": metrics_after.get("short_term_loudness_curve"),
         "true_peak_dbtp": metrics_after.get("estimated_true_peak_dbtp"),
         "loudness_target": quality_options["loudness_target"],
+        "target_lufs": target_lufs,
         "loudness_delta": loudness_delta,
         "channels": metrics_after.get("channels"),
         "sample_rate": metrics_after.get("sample_rate"),
@@ -1855,13 +1889,80 @@ def _register_download(app: Flask, file_path: Path, filename: str) -> str:
     return token
 
 
+def _serve_registered_file(
+    app: Flask,
+    token: str,
+    *,
+    as_attachment: bool,
+    consume: bool,
+) -> tuple:
+    """Serve a registered artifact, optionally consuming its token."""
+    registry: dict = app.config["DOWNLOAD_REGISTRY"]
+    with app.config["DOWNLOAD_REGISTRY_LOCK"]:
+        _cleanup_download_registry(registry)
+        entry = registry.pop(token, None) if consume else registry.get(token)
+
+    if entry is None:
+        return jsonify({"error": "File not found or expired."}), 404
+
+    file_path = Path(entry["path"])
+    if not file_path.exists():
+        return jsonify({"error": "File not found or expired."}), 404
+
+    response = send_file(
+        str(file_path),
+        as_attachment=as_attachment,
+        download_name=entry["filename"],
+    )
+    if consume:
+        response.call_on_close(lambda: file_path.unlink(missing_ok=True))
+    return response
+
+
 def _quality_output_extension(input_path: Path, output_format: str) -> str:
     """Choose a safe local output extension for the quality engine."""
-    if output_format in {"wav", "flac"}:
+    if output_format in {"wav", "flac", "mp3"}:
         return f".{output_format}"
     if output_format == "preserve" and input_path.suffix.lower() in {".wav", ".flac", ".aiff", ".aif"}:
         return input_path.suffix.lower()
     return ".wav"
+
+
+def _metadata_clean_output_extension(input_path: Path, output_format: Optional[str]) -> str:
+    """Choose an output extension for metadata-only export."""
+    if output_format in {"wav", "flac", "mp3"}:
+        return f".{output_format}"
+    if input_path.suffix.lower() in {".wav", ".flac", ".aiff", ".aif", ".mp3"}:
+        return input_path.suffix.lower()
+    return ".wav"
+
+
+def _transcode_without_metadata(input_path: Path, output_path: Path, output_ext: str) -> dict[str, Any]:
+    """Transcode audio while asking ffmpeg to drop container metadata."""
+    from pydub import AudioSegment
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    export_format = output_ext.lstrip(".").replace("aif", "aiff")
+    audio = AudioSegment.from_file(str(input_path))
+    parameters = ["-map_metadata", "-1"]
+    if export_format == "mp3":
+        parameters.extend(["-write_id3v1", "0", "-id3v2_version", "0", "-write_xing", "0"])
+    audio.export(str(output_path), format=export_format, parameters=parameters)
+    return {
+        "success": True,
+        "tags_removed": 0,
+        "chunks_removed": 0,
+        "methods_used": ["metadata_free_transcode"],
+        "errors": [],
+    }
+
+
+def _sha256_path(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def _bit_depth_for_writer(bit_depth_override: str) -> int:
@@ -1870,6 +1971,12 @@ def _bit_depth_for_writer(bit_depth_override: str) -> int:
     if bit_depth_override == "32":
         return 32
     return 24
+
+
+def _sample_rate_for_writer(sample_rate_override: str) -> Optional[int]:
+    if sample_rate_override in {"44100", "48000"}:
+        return int(sample_rate_override)
+    return None
 
 
 def _build_waveform_artifact(input_path: Path, points: int = 240) -> dict[str, Any]:
@@ -1881,6 +1988,9 @@ def _build_waveform_artifact(input_path: Path, points: int = 240) -> dict[str, A
     mono = np.mean(audio, axis=1)
     if mono.size == 0:
         raise ValueError("Cannot build waveform for empty audio.")
+    gpu_artifact = _build_waveform_artifact_cuda(mono, int(sample_rate), int(audio.shape[1]), points)
+    if gpu_artifact is not None:
+        return gpu_artifact
     chunk = max(1, int(np.ceil(mono.size / points)))
     peaks = []
     rms = []
@@ -1894,7 +2004,44 @@ def _build_waveform_artifact(input_path: Path, points: int = 240) -> dict[str, A
         "duration": float(mono.size / sample_rate),
         "sample_rate": int(sample_rate),
         "channels": int(audio.shape[1]),
+        "backend": "cpu",
     }
+
+
+def _build_waveform_artifact_cuda(
+    mono_audio: Any,
+    sample_rate: int,
+    channels: int,
+    points: int,
+) -> Optional[dict[str, Any]]:
+    """Use CUDA for small waveform summaries when torch is available."""
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return None
+        mono_bytes = int(getattr(mono_audio, "nbytes", 0))
+        free_bytes, _total_bytes = torch.cuda.mem_get_info()
+        if mono_bytes <= 0 or mono_bytes > 192 * 1024 * 1024 or free_bytes < mono_bytes * 3:
+            return None
+        device = torch.device("cuda")
+        tensor = torch.as_tensor(mono_audio, device=device, dtype=torch.float32)
+        padded = int(((tensor.numel() + points - 1) // points) * points)
+        if padded != tensor.numel():
+            tensor = torch.nn.functional.pad(tensor, (0, padded - tensor.numel()))
+        frames = tensor.reshape(points, -1)
+        peaks = torch.max(torch.abs(frames), dim=1).values.detach().cpu().tolist()
+        rms = torch.sqrt(torch.mean(frames * frames, dim=1)).detach().cpu().tolist()
+        return {
+            "peaks": [float(value) for value in peaks],
+            "rms": [float(value) for value in rms],
+            "duration": float(len(mono_audio) / sample_rate),
+            "sample_rate": int(sample_rate),
+            "channels": int(channels),
+            "backend": "cuda",
+        }
+    except Exception:
+        return None
 
 
 def _update_job(app: Flask, job_id: str, **updates: Any) -> None:
@@ -1916,17 +2063,11 @@ def run_server(
 ) -> None:
     """Create and run the MMM web server."""
     from .ui.console import ConsoleManager
-    from .ui.banners import BannerManager
 
     console = ConsoleManager()
-    banner = BannerManager()
 
-    banner.show_main_banner()
-
-    console.warning(
-        "LEGAL DISCLAIMER: This tool is for AUTHORIZED SECURITY RESEARCH ONLY"
-    )
-    console.info("   Use only on files you own or have explicit permission to modify\n")
+    console.info("MMV2 Audio Quality Engine web interface")
+    console.info("   Use only on files you own or have explicit permission to process\n")
 
     if host != "127.0.0.1":
         console.warning(
@@ -1938,7 +2079,7 @@ def run_server(
         )
 
     max_mb = max_file_size // (1024 * 1024)
-    console.success(f"Starting MMM web server at http://{host}:{port}")
+    console.success(f"Starting MMV2 web server at http://{host}:{port}")
     console.info(f"   Max upload size: {max_mb} MB")
     console.info("   Press Ctrl+C to stop\n")
 
